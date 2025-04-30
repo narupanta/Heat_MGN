@@ -1,0 +1,113 @@
+Info: Meshing 1D...
+Info: Meshing curve 1 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 2 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 3 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 4 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 5 (Line)
+Info: Meshing curve 6 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 7 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 8 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 9 (Line)
+Info: Meshing curve 10 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 11 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 12 (Line)
+Progress: Meshing 1D...
+Info: Meshing curve 13 (Line)
+Progress: Meshing 1D...
+Info: Done meshing 1D (Wall 0.0277247s, CPU 0.14882s)
+Info: Meshing 2D...
+Info: Meshing surface 1 (Plane, Frontal-Delaunay)
+Progress: Meshing 2D...
+Info: Meshing surface 2 (Plane, Frontal-Delaunay)
+Progress: Meshing 2D...
+Info: Meshing surface 3 (Plane, Frontal-Delaunay)
+Progress: Meshing 2D...
+Info: Meshing surface 4 (Plane, Frontal-Delaunay)
+Progress: Meshing 2D...
+Info: Meshing surface 5 (Plane, Frontal-Delaunay)
+Progress: Meshing 2D...
+Info: Meshing surface 6 (Plane, Frontal-Delaunay)
+Progress: Meshing 2D...
+Info: Done meshing 2D (Wall 0.0685562s, CPU 0.170911s)
+Info: Meshing 3D...
+Progress: Meshing 3D...
+Info: 3D Meshing 1 volume with 1 connected component
+Info: Tetrahedrizing 2279 nodes...
+Info: Done tetrahedrizing 2287 nodes (Wall 0.0210268s, CPU 0.02096s)
+Info: Reconstructing mesh...
+Info:  - Creating surface mesh
+Info:  - Identifying boundary edges
+Info:  - Recovering boundary
+Info: Done reconstructing mesh (Wall 0.0506453s, CPU 0.049552s)
+Info: Found volume 1
+Info: It. 0 - 0 nodes created - worst tet radius 9.89405 (nodes removed 0 0)
+Info: It. 500 - 500 nodes created - worst tet radius 2.05051 (nodes removed 0 0)
+Info: It. 1000 - 1000 nodes created - worst tet radius 1.65159 (nodes removed 0 0)
+Info: It. 1500 - 1500 nodes created - worst tet radius 1.45922 (nodes removed 0 0)
+Info: It. 2000 - 2000 nodes created - worst tet radius 1.32813 (nodes removed 0 0)
+Info: It. 2500 - 2500 nodes created - worst tet radius 1.24067 (nodes removed 0 0)
+Info: It. 3000 - 3000 nodes created - worst tet radius 1.16763 (nodes removed 0 0)
+Info: It. 3500 - 3500 nodes created - worst tet radius 1.11295 (nodes removed 0 0)
+Info: It. 4000 - 4000 nodes created - worst tet radius 1.06713 (nodes removed 0 0)
+Info: It. 4500 - 4500 nodes created - worst tet radius 1.02681 (nodes removed 0 0)
+Info: 3D refinement terminated (7180 nodes total):
+Info:  - 0 Delaunay cavities modified for star shapeness
+Info:  - 0 nodes could not be inserted
+Info:  - 38106 tetrahedra created in 0.208976 sec. (182346 tets/s)
+Info: 0 node relocations
+Progress: Meshing 3D...
+Info: Done meshing 3D (Wall 0.396338s, CPU 0.393668s)
+Info: Optimizing mesh...
+Info: Optimizing volume 1
+Info: Optimization starts (volume = 4e-09) with worst = 0.0142336 / average = 0.776839:
+Info: 0.00 < quality < 0.10 :        77 elements
+Info: 0.10 < quality < 0.20 :       243 elements
+Info: 0.20 < quality < 0.30 :       405 elements
+Info: 0.30 < quality < 0.40 :       673 elements
+Info: 0.40 < quality < 0.50 :      1068 elements
+Info: 0.50 < quality < 0.60 :      1808 elements
+Info: 0.60 < quality < 0.70 :      4031 elements
+Info: 0.70 < quality < 0.80 :      9030 elements
+Info: 0.80 < quality < 0.90 :     13842 elements
+Info: 0.90 < quality < 1.00 :      6929 elements
+Info: 715 edge swaps, 20 node relocations (volume = 4e-09): worst = 0.259597 / average = 0.788467 (Wall 0.0176188s, CPU 0.01756s)
+Info: 721 edge swaps, 22 node relocations (volume = 4e-09): worst = 0.288633 / average = 0.788592 (Wall 0.022126s, CPU 0.022054s)
+Info: No ill-shaped tets in the mesh :-)
+Info: 0.00 < quality < 0.10 :         0 elements
+Info: 0.10 < quality < 0.20 :         0 elements
+Info: 0.20 < quality < 0.30 :         1 elements
+Info: 0.30 < quality < 0.40 :       667 elements
+Info: 0.40 < quality < 0.50 :      1041 elements
+Info: 0.50 < quality < 0.60 :      1758 elements
+Info: 0.60 < quality < 0.70 :      4041 elements
+Info: 0.70 < quality < 0.80 :      9083 elements
+Info: 0.80 < quality < 0.90 :     13973 elements
+Info: 0.90 < quality < 1.00 :      6901 elements
+Info: Done optimizing mesh (Wall 0.0727795s, CPU 0.072538s)
+Info: 7231 nodes 42233 elements
+Info: Writing './geometry/cube_0.002_0.002_0.001_4e-05_0.00025_1.msh'...
+Info: Done writing './geometry/cube_0.002_0.002_0.001_4e-05_0.00025_1.msh'
+Direct: -------------------------------------------------------
+Direct: Version       : 4.13.1
+Direct: License       : GNU General Public License
+Direct: Build OS      : Linux64-sdk
+Direct: Build date    : 20240524
+Direct: Build host    : gmsh.info
+Direct: Build options : 64Bit ALGLIB[contrib] ANN[contrib] Bamg Blas[petsc] Blossom Cgns DIntegration Dlopen DomHex Eigen[contrib] Fltk Gmm[contrib] Hxt Jpeg Kbipack Lapack[petsc] LinuxJoystick MathEx[contrib] Med Mesh Metis[contrib] Mmg Mpeg Netgen Nii2mesh ONELAB ONELABMetamodel OpenCASCADE OpenCASCADE-CAF OpenGL OpenMP OptHom PETSc Parser Plugins Png Post QuadMeshingTools QuadTri Solver TetGen/BR TinyXML2[contrib] Untangle Voro++[contrib] WinslowUntangler Zlib
+Direct: FLTK version  : 1.4.0
+Direct: PETSc version : 3.14.4 (real arithmtic)
+Direct: OCC version   : 7.7.2
+Direct: MED version   : 4.1.0
+Direct: Packaged by   : geuzaine
+Direct: Web site      : https://gmsh.info
+Direct: Issue tracker : https://gitlab.onelab.info/gmsh/gmsh/issues
+Direct: -------------------------------------------------------

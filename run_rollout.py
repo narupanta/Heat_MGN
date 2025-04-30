@@ -39,48 +39,26 @@ def rollout(data) :
     extra_timesteps = len(data)
     pred_temperature_list = []
     gt_temperature_list = []
+    q_list = []
     for timestep in range(extra_timesteps) :
-        print(timestep)
+        print(timestep, "max temp:", torch.max(curr_graph.temperature))
         if timestep < inter_timesteps :
             curr_graph.heat_source = data[timestep].heat_source
         else :
             curr_graph.heat_source = torch.zeros_like(initial_state.heat_source)
-        curr_graph = run_step(curr_graph)
+        curr_graph = run_step(data[timestep])
+        # curr_graph = run_step(curr_graph)
         pred_temperature_list.append(curr_graph.temperature)
         gt_temperature_list.append(data[timestep].target_temperature)
+        q_list.append(data[timestep].heat_source)
 
     return dict(mesh_pos = mesh_pos,
                 node_type = node_type,
                 cells = cells,
                 predict_temperature = pred_temperature_list,
-                gt_temperature = gt_temperature_list)
+                gt_temperature = gt_temperature_list,
+                heat_source = q_list)
 
-
-def plot_paraview(output_dir, output):
-    mesh_pos = output["mesh_pos"].detach().cpu().numpy()
-    cells = output["cells"].detach().cpu().numpy()
-    pred_temperature_list = output["predict_temperature"]
-    gt_temperature_list = output["gt_temperature"]
-    progress_bar = tqdm(range(pred_temperature_list), total=len(temperature_list))
-    for idx, t in progress_bar:
-        points = mesh_pos  # Node positions at current timestep
-        temp_data = pred_temperature_list[idx].detach().cpu().numpy()  # Temperature at current timestep
-        gt_temp_data = gt_temperature_list[idx].detach().cpu().numpy() 
-        # Create a Mesh object with only point data (no cells)
-        mesh = meshio.Mesh(
-            points=points,
-            cells=[("tetra", cells)],  # No connectivity (point cloud)
-            point_data={
-                "pred_temperature": temp_data,
-                "gt_temperature": gt_temp_data   # Add temperature as point data
-            }
-        )
-        
-        # Write the VTU file
-        output_file = os.path.join(output_dir, f"temperature_ts_{idx}.vtu")
-        meshio.write(output_file, mesh)
-    
-    print("VTU files (Point Cloud) generated successfully.")
 
 def plot_paraview_pvd(output_dir, filename, output):
     os.makedirs(output_dir, exist_ok=True)
@@ -90,18 +68,21 @@ def plot_paraview_pvd(output_dir, filename, output):
     pvd_entries = []
     pred_temperature_list = output["predict_temperature"]
     gt_temperature_list = output["gt_temperature"]
+    q_list = output["heat_source"]
     progress_bar = tqdm(enumerate(pred_temperature_list), total=len(pred_temperature_list))
     for idx, t in progress_bar:
         points = mesh_pos  # Node positions at current timestep
         temp_data = pred_temperature_list[idx].detach().cpu().numpy()  # Temperature at current timestep
         gt_temp_data = gt_temperature_list[idx].detach().cpu().numpy() 
+        q_data = q_list[idx].detach().cpu().numpy()
         # Create a Mesh object with only point data (no cells)
         mesh = meshio.Mesh(
             points=points,
             cells=[("tetra", cells)],  # No connectivity (point cloud)
             point_data={
                 "pred_temperature": temp_data,
-                "gt_temperature": gt_temp_data   # Add temperature as point data
+                "gt_temperature": gt_temp_data,
+                "heat_source" : q_data   # Add temperature as point data
             }
         )
 
@@ -125,18 +106,18 @@ def plot_paraview_pvd(output_dir, filename, output):
     print("PVD + VTU time series written successfully.")
 
 if __name__ == "__main__" :
-    
-    data_dir = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/npz_files"
-    output_dir = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/output"
-    paraview_dir = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/paraview_files/single-track-mgn-case1"
+    test_on = "offset"
+    data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T112913"
+    output_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
+    paraview_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
     # run_dir = prepare_directories(output_dir)
     # model_dir = os.path.join(run_dir, 'model_checkpoint')
     # logs_dir = os.path.join(run_dir, "logs")
     # logger_setup(os.path.join(logs_dir, "logs.txt"))
     # logger = logging.getLogger()
-    model_dir = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/output/2025-04-28T12h15m36s/model_checkpoint"
+    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-04-30T19h45m56s/model_checkpoint"
     dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = False)
-    data = dataset[2]
+    data = dataset[1]
     model = EncodeProcessDecode(node_feature_size = 3,
                                 mesh_edge_feature_size = 5,
                                 output_size = 1,
@@ -147,4 +128,4 @@ if __name__ == "__main__" :
     model.eval()
     # Training loop
     output = rollout(data)
-    plot_paraview_pvd(paraview_dir, 'single-track-mgn-case1', output)
+    plot_paraview_pvd(paraview_dir, test_on, output)

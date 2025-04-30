@@ -1,6 +1,6 @@
 import gmsh
 import sys
-
+import os
 # Initialize Gmsh
 class Cube:
     def __init__(self, length, width, height):
@@ -8,7 +8,7 @@ class Cube:
         self.width = width
         self.height = height
 
-def create_msh_file(name, cube: Cube, size_min, dist_min, num_track):
+def create_msh_file(output_dir, name, cube: Cube, size_min, dist_min, y_offset, num_track):
     gmsh.initialize()
     gmsh.logger.start()
     gmsh.model.add(name)
@@ -23,7 +23,7 @@ def create_msh_file(name, cube: Cube, size_min, dist_min, num_track):
     # Generate laser tracks
     tracks = []
     if num_track == 1:
-        y_pos = width / 2
+        y_pos = width / 2 + y_offset
         p1 = gmsh.model.occ.addPoint(0, y_pos, height)
         p2 = gmsh.model.occ.addPoint(length, y_pos, height)
         track = gmsh.model.occ.addLine(p1, p2)
@@ -65,8 +65,8 @@ def create_msh_file(name, cube: Cube, size_min, dist_min, num_track):
 
     # Generate the 3D mesh
     gmsh.model.mesh.generate(3)
-    geometry_name = f"{name}_{cube.length}_{str(cube.width)}_{str(cube.height)}_{str(size_min)}_{str(dist_min)}_{str(num_track)}"
-    gmsh.write(f"{geometry_name}.msh")
+    geometry_name = f"{name}_{cube.length}_{str(cube.width)}_{str(cube.height)}_{str(size_min)}_{str(dist_min)}_{str(y_offset)}_{str(num_track)}"
+    gmsh.write(os.path.join(output_dir, f"{geometry_name}.msh"))
 
     # Optional GUI
     if "-nopopup" not in sys.argv:
@@ -74,7 +74,7 @@ def create_msh_file(name, cube: Cube, size_min, dist_min, num_track):
     with open(f"{geometry_name}_overview.txt", "w") as f:
         f.write("\n".join(gmsh.logger.get()))
     gmsh.finalize()
-    return f"{geometry_name}.msh"
+    return os.path.join(output_dir, f"{geometry_name}.msh")
 # Example usage
 if __name__ == "__main__":
     create_msh_file("./geometry/cube", Cube(2e-3, 2e-3, 1e-3), 0.04e-3, 0.25e-3, 1)

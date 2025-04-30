@@ -114,7 +114,7 @@ class EncodeProcessDecode(torch.nn.Module):
         node_features = self._build_node_latent_features(graph.node_type, graph.temperature, graph.heat_source)
         mesh_edge_features = self._build_mesh_edge_features(graph.mesh_pos, graph.temperature, graph.senders, graph.receivers)    
         
-        node_latents = self.node_encode_net(node_features)          
+        node_latents = self.node_encode_net(self._node_features_normalizer(node_features))          
         mesh_edge_latents = self.mesh_edge_encode_net(self._mesh_edge_normalizer(mesh_edge_features))  
         
         return Data(senders = graph.senders, 

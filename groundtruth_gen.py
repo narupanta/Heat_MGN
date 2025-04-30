@@ -11,13 +11,15 @@ import os
 # -----------------------------
 # Transient 2D Heat Conduction with Enthalpy, Moving Heat Source, Convection & Radiation
 # -----------------------------
-cube = Cube(2e-3, 2e-3, 1e-3)
+cube = Cube(2e-3, 3e-3, 1e-3)
 size_min = 0.04e-3
 dist_min = 0.25e-3
+y_offset = 0.0
 num_track = 2
-output_dir = "./output/"
+geometry_dir = "/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/geometry"
+output_dir = "./groundtruth/"
 # --- Geometry & Mesh ---
-input_geometry_path = create_msh_file("./geometry/cube", cube, size_min, dist_min, num_track)
+input_geometry_path = create_msh_file(geometry_dir, "cube", cube, size_min, dist_min, y_offset, num_track)
 domain, cell_tags, facet_tags = gmshio.read_from_msh(input_geometry_path, MPI.COMM_WORLD, 0)
 fdim = domain.topology.dim - 1
 domain.topology.create_connectivity(fdim, domain.topology.dim)
@@ -127,9 +129,9 @@ while t < T_total:
     T_n_arr = T_n.x.array[:]
     T_list.append(T_n_arr.copy())
     q_list.append(q.x.array[:].copy())
-    xdmf.write_function(T_n, t)
-    xdmf.write_function(q, t)
-    t += dt
+    if i%int((T_total/dt * 0.1)) == 0 :
+        xdmf.write_function(T_n, t)
+        xdmf.write_function(q, t)
     print(f"Time: {t:.6f} s")
 
     track_length = cube.length * 0.5
@@ -139,7 +141,7 @@ while t < T_total:
 
     if num_track == 1:
         # Single track at center
-        y_center = cube.width / 2
+        y_center = cube.width / 2 + y_offset
         if t <= track_duration:
             q.x.array[:] = np.array([moving_heat_source(x, y_center, t) for x in domain.geometry.x], dtype=PETSc.ScalarType)
         else:
@@ -157,6 +159,8 @@ while t < T_total:
     T_sol = problem.solve()
     # Update for next step
     T_n.x.array[:] = T_sol.x.array[:]
+    t += dt
+    i += 1
 np.savez(os.path.join(result_dir, f"{geometry_name}.npz"), t = t_list, T = T_list, mesh_pos = mesh_pos, node_connectivity = node_connectivity, q = q_list)
 
 xdmf.close()

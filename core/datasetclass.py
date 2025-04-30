@@ -2,7 +2,7 @@ import json
 import torch
 from torch_geometric.data import Data, Dataset
 import os
-from .utils import *
+from utils import *
 import numpy as np
 class LPBFDataset(Dataset):
     def __init__(self, data_dir, add_targets, split_frames, add_noise):
@@ -47,8 +47,8 @@ class LPBFDataset(Dataset):
                 target_temperature_t = target_temperature[idx].reshape(-1, 1)
                 heat_source_t = heat_source[idx].reshape(-1, 1)
                 if self.add_noise :
-                    temperature_noise_scale = 5
-                    heat_source_noise_scale = 100
+                    temperature_noise_scale = (torch.max(target_temperature) - torch.min(target_temperature)) * 0.05
+                    heat_source_noise_scale = (torch.max(heat_source) - torch.min(heat_source)) * 0
                     temperature_noise = torch.zeros_like(temperature_t) + temperature_noise_scale * torch.randn_like(temperature_t)
                     heat_source_noise = torch.zeros_like(heat_source_t) + heat_source_noise_scale * torch.randn_like(heat_source_t)
                     temperature_t += temperature_noise
@@ -76,9 +76,9 @@ class LPBFDataset(Dataset):
         return self.file_name_list[idx]
 
 if __name__ == "__main__" :
-    data_dir = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/npz_files"
+    data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016"
     dataset = LPBFDataset(data_dir, add_targets=True, split_frames=True, add_noise = True)
-    data = dataset[0]
+    data = dataset[1]
     print(data[0].temperature)
     print(data[0].target_temperature)
     print(data[0])

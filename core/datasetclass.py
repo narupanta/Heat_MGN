@@ -2,7 +2,7 @@ import json
 import torch
 from torch_geometric.data import Data, Dataset
 import os
-from utils import *
+from .utils import *
 import numpy as np
 class LPBFDataset(Dataset):
     def __init__(self, data_dir, add_targets, split_frames, add_noise):

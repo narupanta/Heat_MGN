@@ -10,7 +10,7 @@ import torch
 from torch.nn import Sequential, Linear, ReLU, LayerNorm
 from torch_geometric.nn import MessagePassing
 from torch_geometric.data import Data
-
+import time
 class GraphNetBlock(torch.nn.Module):
     """Multi-Edge Interaction Network with residual connections."""
 
@@ -31,17 +31,6 @@ class GraphNetBlock(torch.nn.Module):
                                    Linear(self._latent_size,self._latent_size),
                                    ReLU(),
                                    LayerNorm(self._latent_size))    
-        
-    def _update_node_latents(self, node_features, edge_sets):
-        """Aggregrates edge features, and applies node function."""
-        num_nodes = node_features.shape[0]
-        features = [node_features]
-        for edge_set in edge_sets:
-            result = torch_scatter.scatter_add(edge_set.features.float(), edge_set.receivers, dim=0, dim_size=num_nodes)
-            result = result.type(edge_set.features.dtype)
-            features.append(result)
-        features = torch.cat(features, dim=-1)
-        return self.node_feature_net(features)
 
     def forward(self, graph, mask=None):
         """Applies GraphNetBlock and returns updated MultiGraph."""
@@ -50,10 +39,8 @@ class GraphNetBlock(torch.nn.Module):
         receivers = graph.receivers     
         node_latents = graph.node_latents
         mesh_edge_latents = graph.mesh_edge_latents
-        senders_node_latents = node_latents[senders]
         new_mesh_edge_latents = self.mesh_edge_net(torch.cat([node_latents[senders], node_latents[receivers], mesh_edge_latents], dim=-1))
         aggr = torch_scatter.scatter_add(new_mesh_edge_latents.float(), receivers, dim=0, dim_size=node_latents.shape[0])
-        aggr = aggr.type(new_mesh_edge_latents.dtype)
         new_node_latents = self.node_feature_net(torch.cat([node_latents, aggr], dim=-1))
         # apply node function
 
@@ -135,11 +122,23 @@ class EncodeProcessDecode(torch.nn.Module):
     def get_output_normalizer(self):
         return self._output_normalizer
     def predict(self, graph) :
+        start1 = time.perf_counter()
         self.eval()
+        end1 = time.perf_counter()
+
+        start2 = time.perf_counter()
         network_output = self.forward(graph)
+        end2 = time.perf_counter()
+        start3 = time.perf_counter()
         delta_temperature = self._output_normalizer.inverse(network_output)
+        end3 = time.perf_counter()
         cur_temp = graph.temperature
         next_temp = cur_temp + delta_temperature
+        print(
+        f"eval: {end1 - start1:.6f}s, "
+        f"forward: {end2 - start2:.6f}s, "
+        f"inv_norm: {end3 - start3:.6f}s, "
+        )
         return next_temp
     def loss(self, output, graph) :
         current_temp = graph.temperature

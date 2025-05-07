@@ -23,26 +23,29 @@ device = "cuda"
 
 if __name__ == "__main__" :
     
-    data_dir = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/npz_files"
-    output_dir = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/output"
+    data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016/"
+    output_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model"
     run_dir = prepare_directories(output_dir)
     model_dir = os.path.join(run_dir, 'model_checkpoint')
     logs_dir = os.path.join(run_dir, "logs")
     logger_setup(os.path.join(logs_dir, "logs.txt"))
     logger = logging.getLogger()
-    
-    dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = True)
-    data = dataset[0]
-    model = EncodeProcessDecode(node_feature_size = 4,
+    time_window = 2
+    dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = True, time_window = time_window)
+    data = dataset[1]
+    model = EncodeProcessDecode(node_feature_size = 2,
                                 mesh_edge_feature_size = 5,
                                 output_size = 1,
                                 latent_size = 128,
+                                timestep=1e-5,
+                                time_window=time_window,
+                                device=device,
                                 message_passing_steps = 15)
     
     train_loader = DataLoader(data, batch_size = 1, shuffle = False)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=5e-3)
     # Training loop
-    num_epochs = 1000
+    num_epochs = 100
     train_loss_per_epochs = []
     model.to(device)
     is_accumulate_normalizer_phase = True
@@ -73,3 +76,4 @@ if __name__ == "__main__" :
             logger.info(f"Epoch {epoch + 1}/{num_epochs}, loss: {avg_train_loss:.4f}")
         else :
             is_accumulate_normalizer_phase = False
+

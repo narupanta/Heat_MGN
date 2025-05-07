@@ -14,6 +14,7 @@ import h5py
 import meshio
 import time
 
+
 # def load_dataset( , add_target = False, add_noise = False, split = False) :
 #     file_path = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/npz_files/weld_fem_60mm.npz"
 #     dataset = np.load(file_path)
@@ -26,30 +27,34 @@ import time
 device = "cuda"
 def run_step(graph) :
     with torch.no_grad():
-        curr_temp = model.predict(graph)
+        curr_temp = model.predict(graph.to(device))
         graph.temperature = curr_temp
         return graph
 def rollout(data) :
-    data = [frame.to(device) for frame in data]
+    data = [frame for frame in data]
     initial_state = data[0]
     curr_graph = initial_state
     timesteps = len(data)
     # q_list = [data[timestep].heat_source for timestep in range(timesteps)]
     pred_temperature_list = []
     gt_temperature_list = []
+    rmse_list = []
     progress = tqdm(range(timesteps), desc="Rollout")
     for timestep in progress :
-        # print(timestep, "max temp:", torch.max(curr_graph.temperature))
         curr_graph.heat_source = data[timestep].heat_source
-        curr_graph = run_step(curr_graph)
+        # curr_graph = run_step(curr_graph)
+        curr_graph = run_step(data[timestep])
+        rmse_error = torch.sqrt(torch.mean((curr_graph.temperature - data[timestep].target_temperature.to(device))**2))
         pred_temperature_list.append(curr_graph.temperature)
         gt_temperature_list.append(data[timestep].target_temperature)
-
+        rmse_list.append(rmse_error)
+        print("max temp:", torch.max(curr_graph.temperature), "\nerr:", rmse_error)
     return dict(mesh_pos = initial_state.mesh_pos,
                 node_type = initial_state.node_type,
                 cells = initial_state.cells,
                 predict_temperature = pred_temperature_list,
                 gt_temperature = gt_temperature_list,
+                rmse_list = rmse_list,
                 heat_source = [frame.heat_source for frame in data])
 
 
@@ -103,6 +108,39 @@ def plot_paraview_pvd(output_dir, filename, output, max_timesteps=50):
 
     print(f"PVD + VTU files written with downsampled time resolution (every {step} steps).")
 
+def plot_max_temperature_over_time(pred_temp, gt_temp, rmse_temp, time_step=1e-5, title="Temperature Over Time", save_path="temperature-time.png"):
+    """
+    Plots and saves the maximum temperature over time as a PNG image.
+    
+    Parameters:
+    - temperature_sequence: Tensor of shape (T, ...) where T is the number of time steps
+    - time_step: Time interval between steps (default 1.0)
+    - title: Title of the plot
+    - save_path: File path to save the PNG image
+    """
+    
+    max_pred_temp = [torch.max(pred_temp_t).detach().cpu() for pred_temp_t in pred_temp] 
+    max_gt_temp = [torch.max(gt_temp_t).detach().cpu() for gt_temp_t in gt_temp]
+    rmse_temp = [rmse_temp_t.detach().cpu() for rmse_temp_t in rmse_temp]
+    # Create time axis
+    time_axis = torch.arange(len(gt_temp)) * time_step
+    
+    # Plot
+    plt.figure(figsize=(8, 5))
+    plt.plot(time_axis, max_pred_temp.numpy(), label="Max Pred Temp (K)", color='r')
+    plt.plot(time_axis, max_gt_temp.numpy(), label="Max Gt Temp (K)", color='g')
+    plt.plot(time_axis, rmse_temp.numpy(), label="RMSE Temp (K)", color='b')
+    plt.xlabel("Time")
+    plt.ylabel("Temperature (K)")
+    plt.title(title)
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    
+    # Save and show plot
+    plt.savefig(save_path)
+    plt.show()
+
 if __name__ == "__main__" :
     test_on = "offset"
     data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T112913"
@@ -113,10 +151,10 @@ if __name__ == "__main__" :
     # logs_dir = os.path.join(run_dir, "logs")
     # logger_setup(os.path.join(logs_dir, "logs.txt"))
     # logger = logging.getLogger()
-    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-04-30T23h28m03s/model_checkpoint"
+    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-05-05T16h53m34s/model_checkpoint"
     dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = False)
     data = dataset[1]
-    model = EncodeProcessDecode(node_feature_size = 3,
+    model = EncodeProcessDecode(node_feature_size = 2,
                                 mesh_edge_feature_size = 5,
                                 output_size = 1,
                                 latent_size = 128,
@@ -127,4 +165,11 @@ if __name__ == "__main__" :
     model = torch.compile(model)
     # Training loop
     output = rollout(data)
+    # save_dict_to_pkl(output, os.path.join(output_dir, f"{test_on}.pkl"))
+    # plot_max_temperature_over_time(output["predict_temperature"], 
+    #                                output["gt_temperature"], 
+    #                                output["rmse_list"],
+    #                                time_step=1e-5, 
+    #                                title="Temperature Over Time", 
+    #                                save_path = os.path.join(output_dir, f"{test_on}-temperature-time.png"))
     plot_paraview_pvd(paraview_dir, test_on, output)

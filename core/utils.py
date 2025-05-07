@@ -103,3 +103,20 @@ def load_overview(path):
                 except ValueError:
                     settings[key] = val
     return settings
+
+import pickle
+
+def save_dict_to_pkl(data_dict, file_path):
+    """
+    Saves a dictionary to a .pkl file.
+    
+    Parameters:
+    - data_dict: Dictionary to save
+    - file_path: Destination .pkl file path (e.g., "data/output.pkl")
+    """
+    with open(file_path, 'wb') as f:
+        pickle.dump(data_dict, f)
+
+def load_dict_from_pkl(file_path):
+    with open(file_path, 'rb') as f:
+        return pickle.load(f)

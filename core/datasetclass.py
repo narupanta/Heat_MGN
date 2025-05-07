@@ -5,7 +5,7 @@ import os
 from .utils import *
 import numpy as np
 class LPBFDataset(Dataset):
-    def __init__(self, data_dir, add_targets, split_frames, add_noise):
+    def __init__(self, data_dir, add_targets, split_frames, add_noise, time_window):
         """
         Generates synthetic dataset for material deformation use case.
 
@@ -19,6 +19,7 @@ class LPBFDataset(Dataset):
         self.data_dir = data_dir
         self.add_targets = add_targets
         self.add_noise = add_noise
+        self.time_window = time_window
         self.split_frames = split_frames
         self.file_name_list = [filename for filename in sorted(os.listdir(data_dir)) if not os.path.isdir(os.path.join(data_dir, filename))]
     def __len__(self):
@@ -38,16 +39,16 @@ class LPBFDataset(Dataset):
         # edge_index = torch.cat((decomposed_connectivity[0].reshape(1, -1), decomposed_connectivity[1].reshape(1, -1)), dim=0)
         senders, receivers = decomposed_connectivity[0], decomposed_connectivity[1]
         if self.add_targets :
-            target_temperature = temperature[1:, :].detach().clone()
+            target_temperature = torch.stack([temperature[i + 1 : i + 1 + self.time_window] for i in range(len(temperature) - self.time_window)], dim=0)
         if self.split_frames & self.add_targets :
             #list of data (frame)
             frames = []
             for idx in range(target_temperature.shape[0]) :
                 temperature_t = temperature[idx].reshape(-1, 1)
-                target_temperature_t = target_temperature[idx].reshape(-1, 1)
+                target_temperature_t = target_temperature[idx].T
                 heat_source_t = heat_source[idx].reshape(-1, 1)
                 if self.add_noise :
-                    temperature_noise_scale = (torch.max(target_temperature) - torch.min(target_temperature)) * 0.05
+                    temperature_noise_scale = (torch.max(temperature) - torch.min(temperature)) * 0.05
                     heat_source_noise_scale = (torch.max(heat_source) - torch.min(heat_source)) * 0
                     temperature_noise = torch.zeros_like(temperature_t) + temperature_noise_scale * torch.randn_like(temperature_t)
                     heat_source_noise = torch.zeros_like(heat_source_t) + heat_source_noise_scale * torch.randn_like(heat_source_t)
@@ -77,7 +78,7 @@ class LPBFDataset(Dataset):
 
 if __name__ == "__main__" :
     data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016"
-    dataset = LPBFDataset(data_dir, add_targets=True, split_frames=True, add_noise = True)
+    dataset = LPBFDataset(data_dir, add_targets=True, split_frames=True, add_noise = True, time_window = 10)
     data = dataset[1]
     print(data[0].temperature)
     print(data[0].target_temperature)

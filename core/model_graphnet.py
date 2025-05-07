@@ -1,5 +1,5 @@
 import torch
-from torch.nn import Sequential, Linear, ReLU, LayerNorm, LazyLinear
+from torch.nn import Sequential, Linear, ReLU, LayerNorm, LazyLinear, Conv1d
 from torch_geometric.nn import MessagePassing
 from torch_geometric.data import Data
 from .normalization import Normalizer
@@ -11,6 +11,18 @@ from torch.nn import Sequential, Linear, ReLU, LayerNorm
 from torch_geometric.nn import MessagePassing
 from torch_geometric.data import Data
 import time
+
+class Swish(torch.nn.Module):
+    """
+    Swish activation function
+    """
+    def __init__(self, beta=1):
+        super(Swish, self).__init__()
+        self.beta = beta
+
+    def forward(self, x):
+        return x * torch.sigmoid(self.beta*x)
+
 class GraphNetBlock(torch.nn.Module):
     """Multi-Edge Interaction Network with residual connections."""
 
@@ -60,18 +72,24 @@ class EncodeProcessDecode(torch.nn.Module):
                  node_feature_size,
                  mesh_edge_feature_size,
                  output_size,
-                 latent_size,                 
+                 latent_size,
+                 timestep,
+                 time_window,                 
                  message_passing_steps,
+                 device,
                  name='EncodeProcessDecode'):
         super(EncodeProcessDecode, self).__init__()   
         self._node_feature_size = node_feature_size   
         self._mesh_edge_feature_size = mesh_edge_feature_size
         self._latent_size = latent_size
         self._output_size = output_size      
-        self._message_passing_steps = message_passing_steps       
+        self._message_passing_steps = message_passing_steps  
+        self._time_window = time_window
+        self._timestep = timestep     
         self._output_normalizer = Normalizer(size=output_size, name='output_normalizer')
         self._node_features_normalizer = Normalizer(size = node_feature_size, name='node_features_normalizer')
         self._mesh_edge_normalizer = Normalizer(size = mesh_edge_feature_size, name='mesh_edge_normalizer')
+        self._device = device
         # Encoding net (MLP) for node_features
         self.node_encode_net = Sequential(Linear(self._node_feature_size, self._latent_size),
                          ReLU(),
@@ -92,13 +110,16 @@ class EncodeProcessDecode(torch.nn.Module):
             self.graphnet_blocks.append(GraphNetBlock(self._latent_size, self._latent_size*3, self._latent_size*2))
         # Decoding net (MLP) for node_features (output)
         # ND: "Node features Decoding"
-        self.node_decode_net = Sequential(Linear(self._latent_size,self._latent_size),
-                        ReLU(),
-                        Linear(self._latent_size,self._output_size))
+        self.node_decode_net = Sequential(Conv1d(self._latent_size, 8, 1),
+                                          Swish(),
+                                          Conv1d(8, self._time_window, 1))
+        # self.node_decode_net = Sequential(Linear(self._latent_size,self._latent_size),
+        #                 ReLU(),
+        #                 Linear(self._latent_size,self._output_size))
                         
     
     def encoder(self, graph) :
-        node_features = self._build_node_latent_features(graph.node_type, graph.temperature, graph.heat_source)
+        node_features = self._build_node_latent_features(graph.node_type, graph.heat_source)
         mesh_edge_features = self._build_mesh_edge_features(graph.mesh_pos, graph.temperature, graph.senders, graph.receivers)    
         
         node_latents = self.node_encode_net(self._node_features_normalizer(node_features))          
@@ -117,44 +138,40 @@ class EncodeProcessDecode(torch.nn.Module):
             latent_graph = graphnet_block(latent_graph)
         """Decodes node features from graph."""   
         # Decoding node features
-        decoded_nodes = self.node_decode_net(latent_graph.node_latents)    
-        return decoded_nodes
+        dt = (torch.ones(1, self._time_window) * self._timestep)
+        dt = torch.cumsum(dt, dim=1).to(self._device)
+        node_latents = latent_graph.node_latents.unsqueeze(0)
+        node_latents = node_latents.permute(0, 2, 1)
+        decoded_nodes = self.node_decode_net(node_latents)
+        decoded_nodes = decoded_nodes.permute(0, 2, 1).squeeze(0)
+        delta_T = decoded_nodes * dt
+        # decoded_nodes = self.node_decode_net(latent_graph.node_latents)    
+        return delta_T
     def get_output_normalizer(self):
         return self._output_normalizer
     def predict(self, graph) :
-        start1 = time.perf_counter()
         self.eval()
-        end1 = time.perf_counter()
-
-        start2 = time.perf_counter()
         network_output = self.forward(graph)
-        end2 = time.perf_counter()
-        start3 = time.perf_counter()
-        delta_temperature = self._output_normalizer.inverse(network_output)
-        end3 = time.perf_counter()
+        output_normalizer = self.get_output_normalizer()
+        delta_temperature = output_normalizer.inverse(network_output)
+        # delta_temperature = network_output
         cur_temp = graph.temperature
         next_temp = cur_temp + delta_temperature
-        print(
-        f"eval: {end1 - start1:.6f}s, "
-        f"forward: {end2 - start2:.6f}s, "
-        f"inv_norm: {end3 - start3:.6f}s, "
-        )
         return next_temp
     def loss(self, output, graph) :
-        current_temp = graph.temperature
-        target_temp = graph.target_temperature
-        delta_temp = target_temp - current_temp
-        target_temperature_normalizer = self.get_output_normalizer()
-        target_temperature_normalized = target_temperature_normalizer(delta_temp)
-        # target_normalized_stress = stress_normalizer(target_stress)
+        initial_temp = graph.temperature                       # (num_nodes,)
+        target_temp = graph.target_temperature                 # (num_nodes, time_window)
+        delta_temp = target_temp - initial_temp.expand(-1, self._time_window)  # (num_nodes, time_window)
 
-        node_type = graph.node_type
+        normalizer = self.get_output_normalizer()
+        target_temp_normalized = normalizer(delta_temp)        # (num_nodes, time_window)
 
-        #exclude loss from rigid body
-        loss_mask = node_type == 0
-        error = torch.sum((target_temperature_normalized - output) ** 2, dim=1)
-        loss = torch.mean(error[loss_mask])
-        return loss
+        node_type = graph.node_type                            # (num_nodes,)
+        loss_mask = node_type == 0                             # (num_nodes,)
+
+        error = (output - target_temp_normalized) ** 2               # (num_nodes,)
+        loss = torch.sum(error[loss_mask], dim = 0)      # scalar
+        return torch.sum(loss) / self._time_window
     def fem_physical_loss(self, network_output, graph) :
         return # to be developed
     def pde_physical_loss(self, network_output, graph) :
@@ -172,10 +189,10 @@ class EncodeProcessDecode(torch.nn.Module):
         self._node_features_normalizer = torch.load(os.path.join(path, "node_features_normalizer.pth"))
         self._mesh_edge_normalizer = torch.load(os.path.join(path, "mesh_edge_features_normalizer.pth"))
     
-    def _build_node_latent_features(self, node_type, temp_field, heat_source_field) :
+    def _build_node_latent_features(self, node_type, heat_source_field) :
         node_type_onehot = F.one_hot(node_type).to(torch.float)
         node_latent_features = torch.cat(
-            (temp_field, heat_source_field, node_type_onehot), 
+            (heat_source_field, node_type_onehot), 
             dim = -1
             )
         return node_latent_features

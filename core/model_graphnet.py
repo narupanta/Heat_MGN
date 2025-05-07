@@ -138,7 +138,7 @@ class EncodeProcessDecode(torch.nn.Module):
             latent_graph = graphnet_block(latent_graph)
         """Decodes node features from graph."""   
         # Decoding node features
-        dt = (torch.ones(1, self._time_window) * self._timestep)
+        dt = (torch.ones(1, self._time_window))
         dt = torch.cumsum(dt, dim=1).to(self._device)
         node_latents = latent_graph.node_latents.unsqueeze(0)
         node_latents = node_latents.permute(0, 2, 1)

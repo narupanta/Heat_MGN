@@ -119,7 +119,7 @@ class EncodeProcessDecode(torch.nn.Module):
                         
     
     def encoder(self, graph) :
-        node_features = self._build_node_latent_features(graph.node_type, graph.heat_source)
+        node_features = self._build_node_latent_features(graph.node_type, graph.heat_source, graph.temperature)
         mesh_edge_features = self._build_mesh_edge_features(graph.mesh_pos, graph.temperature, graph.senders, graph.receivers)    
         
         node_latents = self.node_encode_net(self._node_features_normalizer(node_features))          
@@ -155,7 +155,7 @@ class EncodeProcessDecode(torch.nn.Module):
         output_normalizer = self.get_output_normalizer()
         delta_temperature = output_normalizer.inverse(network_output)
         # delta_temperature = network_output
-        cur_temp = graph.temperature
+        cur_temp = graph.temperature.expand(-1, self._time_window)
         next_temp = cur_temp + delta_temperature
         return next_temp
     def loss(self, output, graph) :
@@ -189,10 +189,10 @@ class EncodeProcessDecode(torch.nn.Module):
         self._node_features_normalizer = torch.load(os.path.join(path, "node_features_normalizer.pth"))
         self._mesh_edge_normalizer = torch.load(os.path.join(path, "mesh_edge_features_normalizer.pth"))
     
-    def _build_node_latent_features(self, node_type, heat_source_field) :
+    def _build_node_latent_features(self, node_type, heat_source_field, temp_field) :
         node_type_onehot = F.one_hot(node_type).to(torch.float)
         node_latent_features = torch.cat(
-            (heat_source_field, node_type_onehot), 
+            (heat_source_field, node_type_onehot, temp_field), 
             dim = -1
             )
         return node_latent_features

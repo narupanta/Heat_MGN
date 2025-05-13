@@ -5,21 +5,18 @@ from petsc4py import PETSc
 from dolfinx import fem, mesh, io
 from dolfinx.io import XDMFFile, gmshio
 from dolfinx.fem.petsc import LinearProblem
-from generate_geometry import create_msh_file, Cube
+from generate_geometry_special import create_msh_file, Cube
 from datetime import datetime
 import os
 import time
 # -----------------------------
 # Transient 2D Heat Conduction with Enthalpy, Moving Heat Source, Convection & Radiation
 # -----------------------------
-cube = Cube(2e-3, 4e-3, 1e-3)
-
+cube = Cube(2e-3, 2e-3, 1e-3)
 size_min = 0.04e-3
 dist_min = 0.25e-3
-y_offset = 0
+y_offset = -0.0e-3
 num_track = 1
-track_order = [1]  # Custom order (1-based index)
-assert len(track_order) == num_track and set(track_order) == set(range(1, num_track + 1))
 geometry_dir = "/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/geometry"
 output_dir = "./groundtruth/"
 # --- Geometry & Mesh ---
@@ -75,10 +72,11 @@ cf, cr = radius, radius
 ff, fr = 2/(1 + cr/cf), 2/(1 + cf/cr)
 pen_depth = 0.5e-3 # m
 dt = 1e-5 # s
-T_heat = cube.length * 0.5/source_speed * num_track
-T_total = T_heat * 3 # s
+T_heat = cube.length * 0.5/(source_speed * 1/2**0.5) * num_track
+T_total = T_heat * 1.01  # s
 def moving_heat_source(x, y_center, t):
-    x_center = source_speed * t
+    x_center = source_speed * 1/2**0.5 * t
+    y_center = source_speed * 1/2**0.5 * t
     # c = cf * (0.5 + 0.5 * np.tanh(1000 * (x[0] - x_center))) + \
     #     cr * (0.5 + 0.5 * np.tanh(1000 * (x_center - x[0])))
     # f = ff * (0.5 + 0.5 * np.tanh(1000 * (x[0] - x_center))) + \
@@ -86,7 +84,7 @@ def moving_heat_source(x, y_center, t):
     f = 1
     q_max = 6 * η * f * power * np.sqrt(3) / (np.pi**1.5 * radius * radius * radius)
 
-    return q_max* np.exp(-3 * (x[0] - x_center - cube.length/4)**2/radius**2 + -3 * (x[1] - y_center)**2 / radius**2) \
+    return q_max* np.exp(-3 * (x[0] - x_center - cube.length/4)**2/radius**2 + -3 * (x[1] - y_center - cube.width/4)**2 / radius**2) \
                  * np.exp(-3 * (x[2] - cube.height)**2 / pen_depth**2)
 
 q = fem.Function(V, name = "Heat Source")  # Heat source
@@ -140,7 +138,7 @@ while t < T_total:
     print(f"Time: {t:.6f} s")
 
     track_length = cube.length * 0.5
-    track_duration = track_length / source_speed
+    track_duration = track_length / (source_speed * 1/2**0.5)
     total_duration = track_duration * num_track
     track_spacing = cube.width / num_track
 
@@ -155,16 +153,10 @@ while t < T_total:
         # Multiple tracks
         total_duration = track_duration * num_track
         if t < total_duration:
-            current_segment = int(t // track_duration)
-            local_t = t - current_segment * track_duration
-
-            if current_segment < len(track_order):
-                # Apply custom track ordering
-                track_id = track_order[current_segment]
-                y_center = track_spacing * (track_id - 0.5) + y_offset
-                q.x.array[:] = np.array([moving_heat_source(x, y_center, local_t) for x in domain.geometry.x], dtype=PETSc.ScalarType)
-            else:
-                q.x.array[:] = np.array([0.0 for _ in domain.geometry.x], dtype=PETSc.ScalarType)
+            current_track = int(t // track_duration)
+            y_center = track_spacing * (0.5 + current_track)  # center of track
+            local_t = t - current_track * track_duration
+            q.x.array[:] = np.array([moving_heat_source(x, y_center, local_t) for x in domain.geometry.x], dtype=PETSc.ScalarType)
         else:
             q.x.array[:] = np.array([0.0 for _ in domain.geometry.x], dtype=PETSc.ScalarType)
     T_sol = problem.solve()

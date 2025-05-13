@@ -25,37 +25,77 @@ import time
 # def learner() :
     
 device = "cuda"
-def run_step(graph) :
+def run_step(model, graph) :
     with torch.no_grad():
         curr_temp = model.predict(graph.to(device))
         graph.temperature = curr_temp
         return graph
-def rollout(data) :
+# def rollout(model, data) :
+#     data = [frame for frame in data]
+#     initial_state = data[0]
+#     curr_graph = initial_state
+#     timesteps = len(data)
+#     # q_list = [data[timestep].heat_source for timestep in range(timesteps)]
+#     pred_temperature_list = []
+#     gt_temperature_list = []
+#     rmse_list = []
+#     progress = tqdm(range(timesteps), desc="Rollout")
+#     for timestep in progress :
+#         curr_graph.heat_source = data[timestep].heat_source
+#         # curr_graph = run_step(curr_graph)
+#         curr_graph = run_step(data[timestep])
+#         rmse_error = torch.sqrt(torch.mean((curr_graph.temperature - data[timestep].target_temperature.to(device))**2))
+#         pred_temperature_list.append(curr_graph.temperature)
+#         gt_temperature_list.append(data[timestep].target_temperature)
+#         rmse_list.append(rmse_error)
+#         print("max temp:", torch.max(curr_graph.temperature), "\nerr:", rmse_error)
+#     return dict(mesh_pos = initial_state.mesh_pos,
+#                 node_type = initial_state.node_type,
+#                 cells = initial_state.cells,
+#                 predict_temperature = pred_temperature_list,
+#                 gt_temperature = gt_temperature_list,
+#                 rmse_list = rmse_list,
+#                 heat_source = [frame.heat_source for frame in data])
+
+def rollout(model, data, time_window):
     data = [frame for frame in data]
     initial_state = data[0]
-    curr_graph = initial_state
     timesteps = len(data)
-    # q_list = [data[timestep].heat_source for timestep in range(timesteps)]
-    pred_temperature_list = []
-    gt_temperature_list = []
+
     rmse_list = []
-    progress = tqdm(range(timesteps), desc="Rollout")
-    for timestep in progress :
-        curr_graph.heat_source = data[timestep].heat_source
-        # curr_graph = run_step(curr_graph)
-        curr_graph = run_step(data[timestep])
-        rmse_error = torch.sqrt(torch.mean((curr_graph.temperature - data[timestep].target_temperature.to(device))**2))
-        pred_temperature_list.append(curr_graph.temperature)
-        gt_temperature_list.append(data[timestep].target_temperature)
-        rmse_list.append(rmse_error)
-        print("max temp:", torch.max(curr_graph.temperature), "\nerr:", rmse_error)
-    return dict(mesh_pos = initial_state.mesh_pos,
-                node_type = initial_state.node_type,
-                cells = initial_state.cells,
-                predict_temperature = pred_temperature_list,
-                gt_temperature = gt_temperature_list,
-                rmse_list = rmse_list,
-                heat_source = [frame.heat_source for frame in data])
+
+    curr_graph = initial_state.clone()  # Start with first ground truth graph
+    mse_tensor = torch.zeros((1,), device = model._device)
+    pred_temperature_tensor = curr_graph.temperature.to(model._device)
+    gt_temperature_tensor = curr_graph.temperature.to(model._device)
+    progress = tqdm(range(0, timesteps - time_window, time_window), desc="Rollout")
+
+    for t in progress:
+        curr_graph.heat_source = data[t].heat_source  # Use correct heat source
+
+        # === Predict next time_window temperatures ===
+        with torch.no_grad():
+            pred_temp = model.predict(curr_graph.to(device))  # (num_nodes, time_window)
+            curr_graph.temperature = pred_temp[:, -1:].clone()  # use last timestep prediction for next input
+
+        # === Ground truth from data[t+1] to data[t+time_window] ===
+        gt_temp = data[t].target_temperature.to(device)
+        window_mse = torch.mean((pred_temp - gt_temp) ** 2, dim=0)
+        mse_tensor = torch.cat([mse_tensor, window_mse])  # (time_window,)
+        pred_temperature_tensor = torch.cat([pred_temperature_tensor, pred_temp], dim=1)
+        gt_temperature_tensor = torch.cat([gt_temperature_tensor, gt_temp], dim=1)
+
+        print(f"[t={t}] max temp: {torch.max(pred_temp):.4f} | MSE: {torch.mean(window_mse):.4f}")
+
+    return dict(
+        mesh_pos=initial_state.mesh_pos,
+        node_type=initial_state.node_type,
+        cells=initial_state.cells,
+        predict_temperature=pred_temperature_tensor.T,
+        gt_temperature=gt_temperature_tensor.T,
+        mse_tensor=mse_tensor,
+        heat_source=[frame.heat_source for frame in data]
+    )
 
 
 def plot_paraview_pvd(output_dir, filename, output, max_timesteps=50):
@@ -74,8 +114,8 @@ def plot_paraview_pvd(output_dir, filename, output, max_timesteps=50):
     progress_bar = tqdm(selected_indices, total=len(selected_indices))
     for out_idx, timestep in enumerate(progress_bar):
         points = mesh_pos
-        temp_data = output["predict_temperature"][timestep].detach().cpu().numpy()
-        gt_temp_data = output["gt_temperature"][timestep].detach().cpu().numpy()
+        temp_data = output["predict_temperature"][timestep, :].detach().cpu().numpy()
+        gt_temp_data = output["gt_temperature"][timestep, :].detach().cpu().numpy()
         q_data = output["heat_source"][timestep].detach().cpu().numpy()
 
         mesh = meshio.Mesh(
@@ -142,8 +182,12 @@ def plot_max_temperature_over_time(pred_temp, gt_temp, rmse_temp, time_step=1e-5
     plt.show()
 
 if __name__ == "__main__" :
-    test_on = "offset"
-    data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T112913"
+    test_on = "triple321"
+    # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T112913"
+    # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016"
+    # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T113333"
+    # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/20250512T162621"
+    data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/{test_on}"
     output_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
     paraview_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
     # run_dir = prepare_directories(output_dir)
@@ -151,20 +195,24 @@ if __name__ == "__main__" :
     # logs_dir = os.path.join(run_dir, "logs")
     # logger_setup(os.path.join(logs_dir, "logs.txt"))
     # logger = logging.getLogger()
-    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-05-05T16h53m34s/model_checkpoint"
-    dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = False)
+    time_window = 10
+    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-05-09T12h23m14s/model_checkpoint"
+    dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = False, time_window=time_window)
     data = dataset[1]
-    model = EncodeProcessDecode(node_feature_size = 2,
+    model = EncodeProcessDecode(node_feature_size = 3,
                                 mesh_edge_feature_size = 5,
                                 output_size = 1,
                                 latent_size = 128,
-                                message_passing_steps = 15)
+                                message_passing_steps = 15,
+                                time_window=time_window,
+                                timestep=1e-5,
+                                device = device)
     model.to(device)
     model.load_model(model_dir)
     model.eval()
     model = torch.compile(model)
     # Training loop
-    output = rollout(data)
+    output = rollout(model, data, time_window)
     # save_dict_to_pkl(output, os.path.join(output_dir, f"{test_on}.pkl"))
     # plot_max_temperature_over_time(output["predict_temperature"], 
     #                                output["gt_temperature"], 

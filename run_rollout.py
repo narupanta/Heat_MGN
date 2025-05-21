@@ -66,6 +66,7 @@ def rollout(model, data, time_window):
 
     curr_graph = initial_state.clone()  # Start with first ground truth graph
     mse_tensor = torch.zeros((1,), device = model._device)
+    percentage_error_tensor = torch.zeros((1,), device = model._device)
     pred_temperature_tensor = curr_graph.temperature.to(model._device)
     gt_temperature_tensor = curr_graph.temperature.to(model._device)
     progress = tqdm(range(0, timesteps - time_window, time_window), desc="Rollout")
@@ -81,12 +82,14 @@ def rollout(model, data, time_window):
         # === Ground truth from data[t+1] to data[t+time_window] ===
         gt_temp = data[t].target_temperature.to(device)
         window_mse = torch.mean((pred_temp - gt_temp) ** 2, dim=0)
+        window_percentage_error = torch.mean(torch.abs(pred_temp - gt_temp)/gt_temp * 100, dim = 0)
         mse_tensor = torch.cat([mse_tensor, window_mse])  # (time_window,)
+        percentage_error_tensor = torch.cat([percentage_error_tensor, window_percentage_error])
         pred_temperature_tensor = torch.cat([pred_temperature_tensor, pred_temp], dim=1)
         gt_temperature_tensor = torch.cat([gt_temperature_tensor, gt_temp], dim=1)
 
-        print(f"[t={t}] max temp: {torch.max(pred_temp):.4f} | MSE: {torch.mean(window_mse):.4f}")
-
+        print(f"[t={t}] max temp: {torch.max(pred_temp):.4f} | MSE: {torch.mean(window_mse):.4f} | Percentage Error: {torch.mean(window_percentage_error):.4f}")
+    print(torch.mean(percentage_error_tensor))
     return dict(
         mesh_pos=initial_state.mesh_pos,
         node_type=initial_state.node_type,
@@ -182,7 +185,7 @@ def plot_max_temperature_over_time(pred_temp, gt_temp, rmse_temp, time_step=1e-5
     plt.show()
 
 if __name__ == "__main__" :
-    test_on = "triple321"
+    test_on = "triple132"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T112913"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T113333"
@@ -196,7 +199,7 @@ if __name__ == "__main__" :
     # logger_setup(os.path.join(logs_dir, "logs.txt"))
     # logger = logging.getLogger()
     time_window = 10
-    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-05-09T12h23m14s/model_checkpoint"
+    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-05-13T16h08m13s/model_checkpoint"
     dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = False, time_window=time_window)
     data = dataset[1]
     model = EncodeProcessDecode(node_feature_size = 3,
@@ -213,7 +216,7 @@ if __name__ == "__main__" :
     model = torch.compile(model)
     # Training loop
     output = rollout(model, data, time_window)
-    # save_dict_to_pkl(output, os.path.join(output_dir, f"{test_on}.pkl"))
+    np.savez(os.path.join(output_dir, f"rollout.npz"), output)
     # plot_max_temperature_over_time(output["predict_temperature"], 
     #                                output["gt_temperature"], 
     #                                output["rmse_list"],

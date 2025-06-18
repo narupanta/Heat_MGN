@@ -10,7 +10,7 @@ from core.model_graphnet import EncodeProcessDecode
 import numpy as np
 from tqdm import tqdm
 from core.utils import * 
-import h5py
+# import h5py
 import meshio
 import time
 
@@ -91,21 +91,21 @@ def rollout(model, data, time_window):
         print(f"[t={t}] max temp: {torch.max(pred_temp):.4f} | MSE: {torch.mean(window_mse):.4f} | Percentage Error: {torch.mean(window_percentage_error):.4f}")
     print(torch.mean(percentage_error_tensor))
     return dict(
-        mesh_pos=initial_state.mesh_pos,
-        node_type=initial_state.node_type,
-        cells=initial_state.cells,
-        predict_temperature=pred_temperature_tensor.T,
-        gt_temperature=gt_temperature_tensor.T,
-        mse_tensor=mse_tensor,
-        heat_source=[frame.heat_source for frame in data]
+        mesh_pos=initial_state.mesh_pos.detach().cpu().numpy(),
+        node_type=initial_state.node_type.detach().cpu().numpy(),
+        cells=initial_state.cells.detach().cpu().numpy(),
+        predict_temperature=pred_temperature_tensor.T.detach().cpu().numpy(),
+        gt_temperature=gt_temperature_tensor.T.detach().cpu().numpy(),
+        mse_tensor=mse_tensor.detach().cpu().numpy(),
+        heat_source=[frame.heat_source.detach().cpu().numpy() for frame in data]
     )
 
 
 def plot_paraview_pvd(output_dir, filename, output, max_timesteps=50):
     os.makedirs(output_dir, exist_ok=True)
     
-    mesh_pos = output["mesh_pos"].detach().cpu().numpy()
-    cells = output["cells"].detach().cpu().numpy()
+    mesh_pos = output["mesh_pos"]
+    cells = output["cells"]
     total_timesteps = len(output["predict_temperature"])
 
     # Compute downsample step
@@ -117,9 +117,9 @@ def plot_paraview_pvd(output_dir, filename, output, max_timesteps=50):
     progress_bar = tqdm(selected_indices, total=len(selected_indices))
     for out_idx, timestep in enumerate(progress_bar):
         points = mesh_pos
-        temp_data = output["predict_temperature"][timestep, :].detach().cpu().numpy()
-        gt_temp_data = output["gt_temperature"][timestep, :].detach().cpu().numpy()
-        q_data = output["heat_source"][timestep].detach().cpu().numpy()
+        temp_data = output["predict_temperature"][timestep, :]
+        gt_temp_data = output["gt_temperature"][timestep, :]
+        q_data = output["heat_source"][timestep]
 
         mesh = meshio.Mesh(
             points=points,
@@ -185,12 +185,13 @@ def plot_max_temperature_over_time(pred_temp, gt_temp, rmse_temp, time_step=1e-5
     plt.show()
 
 if __name__ == "__main__" :
-    test_on = "triple132"
+    test_on = "poc"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T112913"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T113333"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/20250512T162621"
-    data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/{test_on}"
+    data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/20250617T160028"
+    # data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/testcases/{test_on}"
     output_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
     paraview_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
     # run_dir = prepare_directories(output_dir)
@@ -216,7 +217,7 @@ if __name__ == "__main__" :
     model = torch.compile(model)
     # Training loop
     output = rollout(model, data, time_window)
-    np.savez(os.path.join(output_dir, f"rollout.npz"), output)
+    np.savez(os.path.join(output_dir, f"rollout.npz"), **output)
     # plot_max_temperature_over_time(output["predict_temperature"], 
     #                                output["gt_temperature"], 
     #                                output["rmse_list"],

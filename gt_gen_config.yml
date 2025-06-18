@@ -1,0 +1,35 @@
+geometry:
+  length: 0.002
+  width: 0.002
+  height: 0.001
+  size_min: 8e-5
+  dist_min: 2.5e-4
+  y_offset: 0
+  num_track: 1
+  track_order: [1]
+
+paths:
+  geometry_dir: "./geometry"
+  output_dir: "./groundtruth"
+
+simulation:
+  power: 150.0
+  eta: 1
+  source_speed: 0.1
+  source_width: 9e-4
+  penetration_depth: 5e-4
+  dt: 1e-5
+  total_factor: 1.1
+
+boundary:
+  ambient_temperature: 298.0
+  convection_coefficient: 25.0
+  emissivity: 0.8
+  stefan_boltzmann: 5.67e-8
+
+material:
+  k: "25"  # or "234 + 0.1*(T-273)"
+  rhocp: >
+    8351.910158 * (446.337248 + 0.14180844 * (T-273)
+    - 61.431671211432 * e ** (-0.00031858431233904 * ((T-273) - 525)**2)
+    + 1054.9650568 * e **(-0.00006287810196136 * ((T-273) - 1545)**2))

@@ -2,6 +2,7 @@ output/*
 rollout/*
 testcase/*
 trained_model/*
+groundtruth/*
 slurm*
 *.pdf
 *.ipynb

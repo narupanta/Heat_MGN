@@ -1,8 +1,9 @@
 output/*
 rollout/*
-testcases/*
+testcase/*
 trained_model/*
-
+slurm*
 *.pdf
 *.ipynb
 *.msh
+*.sh

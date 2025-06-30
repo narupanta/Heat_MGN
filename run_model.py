@@ -41,13 +41,22 @@ if __name__ == "__main__":
     logger = logging.getLogger()
 
     time_window = int(config["training"]["time_window"])
-    add_noise = True  # Optional: could read from config["training"]["add_noise"]
+    add_noise = float(config["training"]["add_noise"])  # Optional: could read from config["training"]["add_noise"]
 
-    dataset = LPBFDataset(
+
+    train_dataset = LPBFDataset(
         data_dir,
         add_targets=True,
         split_frames=True,
         add_noise=add_noise,
+        time_window=time_window
+    )
+
+    val_dataset = LPBFDataset(
+        data_dir,
+        add_targets=False,
+        split_frames=False,
+        add_noise=None,
         time_window=time_window
     )
 
@@ -78,7 +87,7 @@ if __name__ == "__main__":
         model.train()
         train_total_loss = 0
         val_total_loss = 0
-        for traj_idx, trajectory in enumerate(dataset):  # assuming dataset.trajectories exists
+        for traj_idx, trajectory in enumerate(train_dataset):  # assuming dataset.trajectories exists
             train_loader = DataLoader(trajectory, batch_size=1, shuffle=True)
             loop = tqdm(enumerate(train_loader), total=len(train_loader), leave=False)
             trajectory_loss = 0
@@ -86,26 +95,38 @@ if __name__ == "__main__":
                 batch = batch.to(device)
                 optimizer.zero_grad()
                 predictions = model(batch)
-                # loss = model.loss(predictions, batch)
-                loss = model.fem_loss(predictions, batch)
+                loss = model.loss(predictions, batch)
+                # loss = model.fem_loss(predictions, batch)
 
                 if not is_accumulate_normalizer_phase:
                     loss.backward()
                     optimizer.step()
                     trajectory_loss += loss.item()
-                    loop.set_description(f"Epoch {epoch + 1} Traj {traj_idx + 1}/{len(dataset)}")
+                    loop.set_description(f"Epoch {epoch + 1} Traj {traj_idx + 1}/{len(train_dataset)}")
                     loop.set_postfix({"Loss": f"{loss.item():.4f}"})
             train_total_loss += trajectory_loss
             logger.info(f"Epoch {epoch+1}, Trajectory {traj_idx+1}: Loss = {train_total_loss:.4f}")
 
             # Rollout/Validation after each trajectory
-            if not is_accumulate_normalizer_phase:
-                val_loss = torch.mean(rollout(model, trajectory, time_window)['mse'])
-                val_total_loss += val_loss
-                logger.info(f"Epoch {epoch + 1}, Trajectory {traj_idx + 1}: Rollout MSE = {val_loss:.4f}")
-
         if not is_accumulate_normalizer_phase:
-            avg_train_loss = train_total_loss / len(dataset)
+            val_total_loss = 0.0
+            for traj_idx, trajectory in enumerate(val_dataset):
+                output = rollout(model, trajectory, time_window)
+                temp_rmse = torch.mean(output["temp_rmse"])
+                percentage_temp_rmse = torch.mean(output["percentage_temp_rmse"])
+                val_loss = percentage_temp_rmse
+                val_total_loss += val_loss.item()
+
+                logger.info(
+                    f"Val Traj {traj_idx + 1}: percentage temperature error: {val_loss:.6e}, temp_rmse: {temp_rmse:.4f}"
+                )
+            avg_train_loss = train_total_loss / len(train_dataset)
+            avg_val_loss = val_total_loss / len(val_dataset)
+
+            logger.info(f"Epoch {epoch + 1} Summary - Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.6e}")
+            print(f"[Epoch {epoch + 1}/{num_epochs}] Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.6e}")
+            
+            avg_train_loss = train_total_loss / len(train_dataset)
             train_loss_per_epochs.append(avg_train_loss)
             if val_total_loss < best_val_loss:
                 best_val_loss = val_total_loss

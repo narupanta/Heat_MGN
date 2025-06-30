@@ -8,17 +8,13 @@ paths:
   # model_dir: "/mnt/c/Users/narun/OneDrive/Desktop/Project/Hydrogel_MGN/Hydrogel_MGN/trained_model/2025-06-05T15h45m54s/model_checkpoint"
   model_dir: null
 training:
-  num_epochs: 150
+  num_epochs: 2
   learning_rate: 5e-5
   weight_decay: 5e-3
   trial_passes: 9
-  time_window: 1
+  time_window: 10
   message_passing_steps: 15
-  target_config:
-    world_pos:
-      noise: 0.01
-    pvf:
-      noise: 0.01
+  add_noise: 0.05
 model:
   node_feature_size: 3
   mesh_edge_feature_size: 5

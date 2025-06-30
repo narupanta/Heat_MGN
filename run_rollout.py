@@ -57,47 +57,46 @@ def run_step(model, graph) :
 #                 rmse_list = rmse_list,
 #                 heat_source = [frame.heat_source for frame in data])
 
-def rollout(model, data, time_window):
-    data = [frame for frame in data]
-    initial_state = data[0]
-    timesteps = len(data)
+def rollout(model, data, time_window, device="cuda"):
+    # data = [frame for frame in data]
+    # initial_state = data[0]
+    # timesteps = len(data)
 
-    rmse_list = []
+    data = data.to(device)
+    initial_state = data.clone()
+    initial_state["temperature"] = data["temperature"][0].unsqueeze(0)
+    initial_state["mesh_pos"] = data["mesh_pos"].unsqueeze(0)
+    initial_state["node_type"] = data["node_type"].unsqueeze(0)
+    initial_state = Data(**initial_state)
+
+    timesteps = len(data["temperature"])
 
     curr_graph = initial_state.clone()  # Start with first ground truth graph
-    mse_tensor = torch.zeros((1,), device = model._device)
-    percentage_error_tensor = torch.zeros((1,), device = model._device)
-    pred_temperature_tensor = curr_graph.temperature.to(model._device)
-    gt_temperature_tensor = curr_graph.temperature.to(model._device)
-    progress = tqdm(range(0, timesteps - time_window, time_window), desc="Rollout")
+    pred_temperature_list = [curr_graph.temperature.to(device)]
+    progress = tqdm(range(0, timesteps, time_window), desc="Rollout")
 
     for t in progress:
-        curr_graph.heat_source = data[t].heat_source  # Use correct heat source
-
         # === Predict next time_window temperatures ===
         with torch.no_grad():
+            curr_graph.heat_source = data.heat_source[t].unsqueeze(0)
             pred_temp = model.predict(curr_graph.to(device))  # (num_nodes, time_window)
-            curr_graph.temperature = pred_temp[:, -1:].clone()  # use last timestep prediction for next input
-
+            curr_graph.temperature = pred_temp[-1:] # use last timestep prediction for next input
+        pred_temperature_list.append(pred_temp)
         # === Ground truth from data[t+1] to data[t+time_window] ===
-        gt_temp = data[t].target_temperature.to(device)
-        window_mse = torch.mean((pred_temp - gt_temp) ** 2, dim=0)
-        window_percentage_error = torch.mean(torch.abs(pred_temp - gt_temp)/gt_temp * 100, dim = 0)
-        mse_tensor = torch.cat([mse_tensor, window_mse])  # (time_window,)
-        percentage_error_tensor = torch.cat([percentage_error_tensor, window_percentage_error])
-        pred_temperature_tensor = torch.cat([pred_temperature_tensor, pred_temp], dim=1)
-        gt_temperature_tensor = torch.cat([gt_temperature_tensor, gt_temp], dim=1)
-
-        print(f"[t={t}] max temp: {torch.max(pred_temp):.4f} | MSE: {torch.mean(window_mse):.4f} | Percentage Error: {torch.mean(window_percentage_error):.4f}")
-    print(torch.mean(percentage_error_tensor))
+    pred_temperature_tensor = torch.cat(pred_temperature_list, dim=0)[:timesteps]
+    gt_temperature = data.temperature
+    temp_error = torch.sqrt(torch.mean(torch.sum((pred_temperature_tensor - gt_temperature)**2, dim = 2), dim = 1))
+    percentage_temp_error = torch.sqrt(torch.mean(torch.sum((1 - pred_temperature_tensor/gt_temperature)**2, dim = 2), dim = 1))
+    print("temp_error: ", torch.mean(temp_error).item(), "percentage_temp_error: ", torch.mean(percentage_temp_error).item())
     return dict(
-        mesh_pos=initial_state.mesh_pos.detach().cpu().numpy(),
-        node_type=initial_state.node_type.detach().cpu().numpy(),
-        cells=initial_state.cells.detach().cpu().numpy(),
-        predict_temperature=pred_temperature_tensor.T.detach().cpu().numpy(),
-        gt_temperature=gt_temperature_tensor.T.detach().cpu().numpy(),
-        mse_tensor=mse_tensor.detach().cpu().numpy(),
-        heat_source=[frame.heat_source.detach().cpu().numpy() for frame in data]
+        mesh_pos=initial_state.mesh_pos.squeeze(0),
+        node_type=initial_state.node_type.squeeze(0),
+        cells=initial_state.cells,
+        predict_temperature=pred_temperature_tensor,
+        gt_temperature = data.temperature,
+        heat_source = data.heat_source,
+        temp_rmse = temp_error,
+        percentage_temp_rmse = percentage_temp_error
     )
 
 

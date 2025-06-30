@@ -31,37 +31,34 @@ class LPBFDataset(Dataset):
         data = np.load(os.path.join(self.data_dir, file_name))
 
         decomposed_connectivity = tetrahedral_to_edges(torch.tensor(data['node_connectivity']))['two_way_connectivity']
-        temperature = torch.tensor(data["T"], dtype=torch.float)
-        heat_source = torch.tensor(data["q"], dtype=torch.float)
+        temperature = torch.tensor(data["T"], dtype=torch.float).unsqueeze(-1)
+        heat_source = torch.tensor(data["q"], dtype=torch.float).unsqueeze(-1)
         mesh_pos = torch.tensor(data["mesh_pos"], dtype=torch.float)
         cells = torch.tensor(data['node_connectivity'])
         node_type = torch.zeros((mesh_pos.shape[0]), dtype=torch.int64)
         # edge_index = torch.cat((decomposed_connectivity[0].reshape(1, -1), decomposed_connectivity[1].reshape(1, -1)), dim=0)
         senders, receivers = decomposed_connectivity[0], decomposed_connectivity[1]
         if self.add_targets :
-            target_temperature = torch.stack([temperature[i + 1 : i + 1 + self.time_window] for i in range(len(temperature) - self.time_window)], dim=0)
+            target_temperature = torch.stack([temperature[i + 1 : i + 1 + self.time_window] for i in range(len(temperature) - self.time_window)])
         if self.split_frames & self.add_targets :
             #list of data (frame)
             frames = []
             for idx in range(target_temperature.shape[0]) :
-                temperature_t = temperature[idx].reshape(-1, 1)
-                target_temperature_t = target_temperature[idx].T
-                heat_source_t = heat_source[idx].reshape(-1, 1)
+                temperature_t = temperature[idx]
+                target_temperature_t = target_temperature[idx]
+                heat_source_t = heat_source[idx]
                 if self.add_noise :
                     temperature_noise_scale = (torch.max(temperature) - torch.min(temperature)) * self.add_noise
-                    heat_source_noise_scale = (torch.max(heat_source) - torch.min(heat_source)) * 0
                     temperature_noise = torch.zeros_like(temperature_t) + temperature_noise_scale * torch.randn_like(temperature_t)
-                    heat_source_noise = torch.zeros_like(heat_source_t) + heat_source_noise_scale * torch.randn_like(heat_source_t)
                     temperature_t += temperature_noise
-                    heat_source_t += heat_source_noise
-                frame = Data(temperature = temperature_t, 
+                frame = Data(temperature = temperature_t.unsqueeze(0), 
                              target_temperature = target_temperature_t, 
-                             heat_source = heat_source_t,
-                             mesh_pos = mesh_pos,  
+                             heat_source = heat_source_t.unsqueeze(0),
+                             mesh_pos = mesh_pos.unsqueeze(0),  
                              senders = senders, 
                              receivers = receivers, 
-                             cells = cells,
-                             node_type = node_type)
+                             cells = cells.unsqueeze(0),
+                             node_type = node_type.unsqueeze(0))
                 frames.append(frame)
             return frames
 

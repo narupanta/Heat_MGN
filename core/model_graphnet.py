@@ -1,5 +1,5 @@
 import torch
-from torch.nn import Sequential, Linear, ReLU, LayerNorm, LazyLinear, Conv1d
+from torch.nn import Sequential, Linear, ReLU, LayerNorm, LazyLinear, Conv1d, LeakyReLU
 from torch_geometric.nn import MessagePassing
 from torch_geometric.data import Data
 from .normalization import Normalizer
@@ -33,10 +33,10 @@ class Swish(torch.nn.Module):
 class GraphNetBlock(torch.nn.Module):
     """Multi-Edge Interaction Network with residual connections."""
 
-    def __init__(self, latent_size, in_size1, in_size2):
+    def __init__(self, latent_size, in_size1, in_size2, attention = None):
         super().__init__()
         self._latent_size = latent_size
-        
+        self.attention = attention
         # update_mesh_edge_net: e_m ij' = f1(xi, xj, e_m ij)
         self.mesh_edge_net = Sequential(Linear(in_size1,self._latent_size),
                                    ReLU(),
@@ -50,7 +50,10 @@ class GraphNetBlock(torch.nn.Module):
                                    Linear(self._latent_size,self._latent_size),
                                    ReLU(),
                                    LayerNorm(self._latent_size))    
-
+        if self.attention :
+            self.attention_layer = Sequential(LazyLinear(1),
+                                            LeakyReLU(negative_slope=0.2)
+                                            )
     def forward(self, graph, mask=None):
         """Applies GraphNetBlock and returns updated MultiGraph."""
         # apply edge functions
@@ -59,9 +62,12 @@ class GraphNetBlock(torch.nn.Module):
         node_latents = graph.node_latents
         mesh_edge_latents = graph.mesh_edge_latents
         new_mesh_edge_latents = self.mesh_edge_net(torch.cat([node_latents[:, senders, :], node_latents[:, receivers, :], mesh_edge_latents], dim=-1))
+        if self.attention :
+            attention_input = self.attention_layer(new_mesh_edge_latents)
+            attention = F.softmax(attention_input, dim=0)
+            new_mesh_edge_latents = attention * new_mesh_edge_latents
         aggr = torch_scatter.scatter_add(new_mesh_edge_latents.float(), receivers, dim=1)
         new_node_latents = self.node_feature_net(torch.cat([node_latents, aggr], dim=-1))
-        # apply node function
 
         # add residual connections
         new_node_latents += node_latents
@@ -83,6 +89,7 @@ class EncodeProcessDecode(torch.nn.Module):
                  timestep,
                  time_window,                 
                  message_passing_steps,
+                 attention,
                  device,
                  name='EncodeProcessDecode'):
         super(EncodeProcessDecode, self).__init__()   
@@ -91,6 +98,7 @@ class EncodeProcessDecode(torch.nn.Module):
         self._latent_size = latent_size
         self._output_size = output_size      
         self._message_passing_steps = message_passing_steps  
+        self._attention = attention
         self._time_window = time_window
         self._timestep = timestep     
         self._output_normalizer = Normalizer(time_window, output_size, 'output_normalizer', device)
@@ -114,7 +122,7 @@ class EncodeProcessDecode(torch.nn.Module):
 
         self.graphnet_blocks = torch.nn.ModuleList()
         for _ in range(message_passing_steps):
-            self.graphnet_blocks.append(GraphNetBlock(self._latent_size, self._latent_size*3, self._latent_size*2))
+            self.graphnet_blocks.append(GraphNetBlock(self._latent_size, self._latent_size*3, self._latent_size*2, self._attention))
         # Decoding net (MLP) for node_features (output)
         # ND: "Node features Decoding"
         self.node_decode_net = Sequential(Conv1d(self._latent_size, 8, 1),
@@ -174,7 +182,7 @@ class EncodeProcessDecode(torch.nn.Module):
         loss_mask = node_type == 0                             # (num_nodes,)
 
         error = (output - target_temp_normalized) ** 2               # (num_nodes,)
-        loss = torch.sum(error[:, loss_mask.squeeze(0), :], dim = 0)      # scalar
+        loss = torch.max(error[:, loss_mask.squeeze(0), :], dim = 1)      # scalar
         return torch.mean(loss)
     def fem_loss(self, network_output, graph) :
         mesh_pos = graph.mesh_pos.detach().cpu()
@@ -214,6 +222,10 @@ class EncodeProcessDecode(torch.nn.Module):
         load_vec_tensor = torch.tensor(load_vec, dtype = torch.float, device = self._device, requires_grad=True)
         res = torch.mean((stiffness_tensor @ next_temp - load_vec_tensor)**2)
         return res
+
+    def pde_loss(self, network_output, graph) :
+        res = None
+        return res
     
     def save_model(self, path):
         torch.save(self.state_dict(), os.path.join(path, "model_weights.pth"))
@@ -228,9 +240,9 @@ class EncodeProcessDecode(torch.nn.Module):
         self._mesh_edge_normalizer = torch.load(os.path.join(path, "mesh_edge_features_normalizer.pth"))
     
     def _build_node_latent_features(self, node_type, heat_source_field, temp_field) :
-        node_type_onehot = F.one_hot(node_type).to(torch.float)
+        # node_type_onehot = F.one_hot(node_type).to(torch.float)
         node_latent_features = torch.cat(
-            (heat_source_field, node_type_onehot, temp_field), 
+            (heat_source_field, temp_field), 
             dim = -1
             )
         return node_latent_features
@@ -245,3 +257,6 @@ class EncodeProcessDecode(torch.nn.Module):
             )
         return mesh_edge_features
 
+
+def laplacian() :
+    pass

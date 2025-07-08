@@ -68,7 +68,8 @@ if __name__ == "__main__":
         timestep=float(config["model"]["timestep"]),
         time_window=time_window,
         device=device,
-        message_passing_steps=config["training"]["message_passing_steps"]
+        message_passing_steps=config["training"]["message_passing_steps"],
+        attention=config["training"]["attention"]
     )
 
     model.to(device)
@@ -132,6 +133,7 @@ if __name__ == "__main__":
                 best_val_loss = val_total_loss
                 model.save_model(model_dir)
                 torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer_state_dict.pth"))
+                logger.info("Checkpoint saved (best model so far).")
             print(f"Epoch {epoch + 1}/{num_epochs}, loss: {avg_train_loss:.4f}")
         else:
             is_accumulate_normalizer_phase = False

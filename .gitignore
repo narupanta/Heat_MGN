@@ -1,8 +1,10 @@
 output/*
 rollout/*
-testcases/*
+testcase/*
 trained_model/*
-
+groundtruth/*
+slurm*
 *.pdf
 *.ipynb
 *.msh
+*.sh

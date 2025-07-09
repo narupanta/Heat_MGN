@@ -182,7 +182,7 @@ class EncodeProcessDecode(torch.nn.Module):
         loss_mask = node_type == 0                             # (num_nodes,)
 
         error = (output - target_temp_normalized) ** 2               # (num_nodes,)
-        loss = torch.max(error[:, loss_mask.squeeze(0), :], dim = 1)      # scalar
+        loss = torch.max(error[:, loss_mask.squeeze(0), :], dim = 1).values      # scalar
         return torch.mean(loss)
     def fem_loss(self, network_output, graph) :
         mesh_pos = graph.mesh_pos.detach().cpu()
@@ -224,8 +224,16 @@ class EncodeProcessDecode(torch.nn.Module):
         return res
 
     def pde_loss(self, network_output, graph) :
-        res = None
-        return res
+        laplacian = cotangent_laplacian_tetrahedral(graph.mesh_pos, graph.cells)
+        output_normalizer = self.get_output_normalizer()
+        delta_temperature = output_normalizer.inverse(network_output)
+        laplacian_T = torch.sparse.mm(laplacian, graph.temperature.squeeze(0))
+        rhocp = lambda T: 8351.910158 * (446.337248 + 0.14180844 * (T-273) - 61.431671211432 * np.e ** (-0.00031858431233904*((T-273)-525)**2) + 1054.9650568*np.e **(-0.00006287810196136*((T-273)-1545)**2))
+        k = lambda T: 25   # W/(m·K)
+        lhs = rhocp(graph.temperature.squeeze(0)) * delta_temperature/self._timestep
+        rhs = k(graph.temperature.squeeze(0)) * laplacian_T + graph.heat_source.squeeze(0)
+        res = (lhs - rhs)**2
+        return torch.mean(res)
     
     def save_model(self, path):
         torch.save(self.state_dict(), os.path.join(path, "model_weights.pth"))
@@ -257,6 +265,65 @@ class EncodeProcessDecode(torch.nn.Module):
             )
         return mesh_edge_features
 
+def cotangent_laplacian_tetrahedral(mesh_pos, tets):
+    """
+    mesh_pos: [N, 3] (float tensor) - vertex positions
+    tets: [M, 4] (long tensor) - tetrahedral connectivity (indices into mesh_pos)
+    returns: sparse Laplacian matrix [N, N] in torch.sparse_coo_tensor format
+    """
+    assert mesh_pos.shape[-1] == 3, "Tetrahedral meshes require 3D positions"
+    mesh_pos = mesh_pos.squeeze(0)
+    tets = tets.squeeze(0)
+    # Indices for tetrahedron vertices
+    i0, i1, i2, i3 = tets[:, 0], tets[:, 1], tets[:, 2], tets[:, 3]
+    v0, v1, v2, v3 = mesh_pos[i0], mesh_pos[i1], mesh_pos[i2], mesh_pos[i3]
 
-def laplacian() :
-    pass
+    def face_cotangent(p0, p1, p2, opposite):
+        """
+        Compute cotangent weight for a face (p0, p1, p2) with opposite vertex.
+        This is based on the angle between the face normal and the opposite vertex.
+        """
+        # Face normal
+        n = torch.cross(p1 - p0, p2 - p0, dim=1)
+        n_norm = torch.norm(n, dim=1).clamp(min=1e-8)
+        # Vector from face to opposite point
+        vol_vec = opposite - p0
+        height = (vol_vec * n).sum(dim=1).abs() / n_norm
+        area = 0.5 * n_norm
+        # Cotangent approximation: height / area ~ cot(angle)
+        return 0.5 * height / area
+
+    # For each face in the tetrahedron (4 faces per tetrahedron), compute cotangent weights
+    cot01_2 = face_cotangent(v0, v1, v2, v3)
+    cot01_3 = face_cotangent(v0, v1, v3, v2)
+    cot02_3 = face_cotangent(v0, v2, v3, v1)
+    cot12_3 = face_cotangent(v1, v2, v3, v0)
+
+    rows = torch.cat([i0, i0, i0, i1, i1, i2])
+    cols = torch.cat([i1, i2, i3, i2, i3, i3])
+    weights = torch.cat([
+        cot01_2 + cot01_3,  # (i0, i1)
+        cot01_2 + cot02_3,  # (i0, i2)
+        cot01_3 + cot02_3,  # (i0, i3)
+        cot01_2 + cot12_3,  # (i1, i2)
+        cot01_3 + cot12_3,  # (i1, i3)
+        cot02_3 + cot12_3   # (i2, i3)
+    ]) * 0.5
+
+    # Since Laplacian is symmetric, duplicate for transpose entries
+    all_rows = torch.cat([rows, cols])
+    all_cols = torch.cat([cols, rows])
+    all_weights = torch.cat([weights, weights])
+
+    n = mesh_pos.shape[0]
+    L_off = torch.sparse_coo_tensor(torch.stack([all_rows, all_cols]), all_weights, size=(n, n))
+
+    # Diagonal entries
+    diag_vals = torch.zeros(n, dtype=all_weights.dtype, device=all_weights.device).index_add(0, all_rows, all_weights)
+    diag_indices = torch.arange(n, device=mesh_pos.device)
+    L_diag = torch.sparse_coo_tensor(
+        torch.stack([diag_indices, diag_indices]), -diag_vals, size=(n, n)
+    )
+
+    L = L_off + L_diag
+    return L.coalesce()

@@ -89,14 +89,14 @@ def rollout(model, data, time_window, device="cuda"):
     percentage_temp_error = torch.sqrt(torch.mean(torch.sum((1 - pred_temperature_tensor/gt_temperature)**2, dim = 2), dim = 1))
     print("temp_error: ", torch.mean(temp_error).item(), "percentage_temp_error: ", torch.mean(percentage_temp_error).item())
     return dict(
-        mesh_pos=initial_state.mesh_pos.squeeze(0),
-        node_type=initial_state.node_type.squeeze(0),
-        cells=initial_state.cells,
-        predict_temperature=pred_temperature_tensor,
-        gt_temperature = data.temperature,
-        heat_source = data.heat_source,
-        temp_rmse = temp_error,
-        percentage_temp_rmse = percentage_temp_error
+        mesh_pos=initial_state.mesh_pos.squeeze(0).detach().cpu().numpy(),
+        node_type=initial_state.node_type.squeeze(0).detach().cpu().numpy(),
+        cells=initial_state.cells.detach().cpu().numpy(),
+        predict_temperature=pred_temperature_tensor.detach().cpu().numpy(),
+        gt_temperature = data.temperature.detach().cpu().numpy(),
+        heat_source = data.heat_source.detach().cpu().numpy(),
+        temp_rmse = temp_error.detach().cpu(),
+        percentage_temp_rmse = percentage_temp_error.detach().cpu()
     )
 
 
@@ -184,12 +184,12 @@ def plot_max_temperature_over_time(pred_temp, gt_temp, rmse_temp, time_step=1e-5
     plt.show()
 
 if __name__ == "__main__" :
-    test_on = "poc"
+    test_on = "triple312"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T112913"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T113333"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/20250512T162621"
-    data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/20250617T160028"
+    data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/diagonal"
     # data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/testcases/{test_on}"
     output_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
     paraview_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
@@ -199,10 +199,10 @@ if __name__ == "__main__" :
     # logger_setup(os.path.join(logs_dir, "logs.txt"))
     # logger = logging.getLogger()
     time_window = 10
-    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-05-13T16h08m13s/model_checkpoint"
-    dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = False, time_window=time_window)
+    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-07-01T15h21m20s/model_checkpoint"
+    dataset = LPBFDataset(data_dir, add_targets= False, split_frames=False, add_noise = None, time_window=time_window)
     data = dataset[1]
-    model = EncodeProcessDecode(node_feature_size = 3,
+    model = EncodeProcessDecode(node_feature_size = 2,
                                 mesh_edge_feature_size = 5,
                                 output_size = 1,
                                 latent_size = 128,

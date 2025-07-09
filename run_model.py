@@ -96,15 +96,17 @@ if __name__ == "__main__":
                 batch = batch.to(device)
                 optimizer.zero_grad()
                 predictions = model(batch)
-                loss = model.loss(predictions, batch)
-                # loss = model.fem_loss(predictions, batch)
-
+                data_loss = model.loss(predictions, batch)
+                pde_loss = model.pde_loss(predictions, batch)
+                loss = data_loss + (max(epoch, 5) - 5)/(epoch - 5 + 1e-8) * pde_loss
                 if not is_accumulate_normalizer_phase:
                     loss.backward()
                     optimizer.step()
                     trajectory_loss += loss.item()
                     loop.set_description(f"Epoch {epoch + 1} Traj {traj_idx + 1}/{len(train_dataset)}")
-                    loop.set_postfix({"Loss": f"{loss.item():.4f}"})
+                    loop.set_postfix({"Loss": f"{loss.item():.4f}",
+                                      "data loss": f"{data_loss.item():.4f}",
+                                      "pde loss": f"{pde_loss.item():.4f}"})
             train_total_loss += trajectory_loss
             logger.info(f"Epoch {epoch+1}, Trajectory {traj_idx+1}: Loss = {train_total_loss:.4f}")
 

@@ -184,12 +184,12 @@ def plot_max_temperature_over_time(pred_temp, gt_temp, rmse_temp, time_step=1e-5
     plt.show()
 
 if __name__ == "__main__" :
-    test_on = "triple312"
+    test_on = "tst"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T112913"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T113333"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/20250512T162621"
-    data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/groundtruth/diagonal"
+    data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/training_dataset"
     # data_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/testcases/{test_on}"
     output_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
     paraview_dir = f"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/rollout/{test_on}"
@@ -199,14 +199,17 @@ if __name__ == "__main__" :
     # logger_setup(os.path.join(logs_dir, "logs.txt"))
     # logger = logging.getLogger()
     time_window = 10
+    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-07-08T22h14m17s/model_checkpoint"
     model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-07-01T15h21m20s/model_checkpoint"
+    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-07-15T16h29m11s/model_checkpoint"
     dataset = LPBFDataset(data_dir, add_targets= False, split_frames=False, add_noise = None, time_window=time_window)
-    data = dataset[1]
+    data = dataset[0]
     model = EncodeProcessDecode(node_feature_size = 2,
                                 mesh_edge_feature_size = 5,
                                 output_size = 1,
                                 latent_size = 128,
                                 message_passing_steps = 15,
+                                attention = False,
                                 time_window=time_window,
                                 timestep=1e-5,
                                 device = device)

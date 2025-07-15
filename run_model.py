@@ -42,7 +42,8 @@ if __name__ == "__main__":
 
     time_window = int(config["training"]["time_window"])
     add_noise = float(config["training"]["add_noise"])  # Optional: could read from config["training"]["add_noise"]
-
+    alpha = float(config["training"]["alpha"])
+    beta = float(config["training"]["beta"])
 
     train_dataset = LPBFDataset(
         data_dir,
@@ -97,16 +98,16 @@ if __name__ == "__main__":
                 optimizer.zero_grad()
                 predictions = model(batch)
                 data_loss = model.loss(predictions, batch)
-                pde_loss = model.pde_loss(predictions, batch)
-                loss = data_loss + (max(epoch, 5) - 5)/(epoch - 5 + 1e-8) * pde_loss
+                physic_loss = model.physic_loss(predictions, batch)
+                loss = alpha * data_loss + beta * physic_loss
                 if not is_accumulate_normalizer_phase:
                     loss.backward()
                     optimizer.step()
                     trajectory_loss += loss.item()
                     loop.set_description(f"Epoch {epoch + 1} Traj {traj_idx + 1}/{len(train_dataset)}")
-                    loop.set_postfix({"Loss": f"{loss.item():.4f}",
-                                      "data loss": f"{data_loss.item():.4f}",
-                                      "pde loss": f"{pde_loss.item():.4f}"})
+                    loop.set_postfix({"Loss": f"{loss.item():.4f}"})
+                                    #   "data loss": f"{data_loss.item():.4f}",
+                                    #   "pde loss": f"{pde_loss.item():.4f}"})
             train_total_loss += trajectory_loss
             logger.info(f"Epoch {epoch+1}, Trajectory {traj_idx+1}: Loss = {train_total_loss:.4f}")
 

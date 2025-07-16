@@ -7,6 +7,7 @@ import os
 import torch.nn.functional as F
 import torch_scatter
 import torch
+from torch_geometric.utils import get_laplacian, to_scipy_sparse_matrix
 from torch.nn import Sequential, Linear, ReLU, LayerNorm
 from torch_geometric.nn import MessagePassing
 from torch_geometric.data import Data
@@ -19,6 +20,7 @@ import basix.ufl
 from dolfinx.fem.petsc import LinearProblem
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
 import numpy as np
+from scipy.sparse import coo_matrix
 class Swish(torch.nn.Module):
     """
     Swish activation function
@@ -184,56 +186,25 @@ class EncodeProcessDecode(torch.nn.Module):
         error = (output - target_temp_normalized) ** 2               # (num_nodes,)
         loss = torch.max(error[:, loss_mask.squeeze(0), :], dim = 1).values      # scalar
         return torch.mean(loss)
-    def fem_loss(self, network_output, graph) :
-        mesh_pos = graph.mesh_pos.detach().cpu()
-        cells = graph.cells.detach().cpu()
-        output_normalizer = self.get_output_normalizer()
-        # delta_temperature = output_normalizer.inverse(network_output)
+
+    def physic_loss(self, network_output, graph) :
+        normalizer = self.get_output_normalizer()
         # delta_temperature = network_output
-        cur_temp = graph.temperature.expand(-1, self._time_window)
-        next_temp = cur_temp + network_output
-
-        mesh = create_mesh_from_arrays(mesh_pos, cells, "tetrahedron", mesh_pos.shape[1])
-        u = dolfinx.fem.functionspace(mesh, ("CG", 1))
-
+        cur_temp = graph.temperature
+        k = lambda T: 25
         rhocp = lambda T: 8351.910158 * (446.337248 + 0.14180844 * (T-273) - 61.431671211432 * np.e ** (-0.00031858431233904*((T-273)-525)**2) + 1054.9650568*np.e **(-0.00006287810196136*((T-273)-1545)**2))
-        k = lambda T: 25   # W/(m·K)
+        dt_window = torch.arange(1, self._time_window + 1).repeat_interleave(self._output_size).to(self._device) * self._timestep
+        temp_laplacian = fem_laplacian_tetra(graph.mesh_pos.squeeze(0), graph.cells.squeeze(0), cur_temp.squeeze(0).squeeze(-1), self._device)
+        physical = 1/rhocp(cur_temp) * (k(cur_temp) * temp_laplacian.unsqueeze(0).unsqueeze(-1) + graph.heat_source)
+        delta_T_physic_onestep = normalizer(dt_window.reshape(-1, 1, 1) * physical)
 
-        T_ = ufl.TrialFunction(u)
-        v = ufl.TestFunction(u)
-        T_n = dolfinx.fem.Function(u, name="Temperature (K)")
-        T_n.x.array[:] = graph.temperature.detach().cpu().squeeze(-1)
+        node_type = graph.node_type                            # (num_nodes,)
+        loss_mask = node_type == 0                             # (num_nodes,)
 
-        q = dolfinx.fem.Function(u, name="Heat Source")
-        q.x.array[:] = graph.heat_source.detach().cpu().squeeze(-1)
+        error = (network_output - delta_T_physic_onestep) ** 2               # (num_nodes,)
+        loss = torch.mean(error[:, loss_mask.squeeze(0), :], dim = 1)      # scalar
 
-        a = (1/self._timestep) * rhocp(T_n)*ufl.inner(T_, v)*ufl.dx + k(T_n)*ufl.inner(ufl.grad(T_), ufl.grad(v))*ufl.dx
-        L = (1/self._timestep)*rhocp(T_n)*ufl.inner(T_n, v)*ufl.dx + ufl.inner(q, v)*ufl.dx
-        problem = LinearProblem(a, L, bcs=[], petsc_options={"ksp_type": "cg", "pc_type": "ilu"})
-        stiffness = assemble_matrix(problem.a)
-        stiffness.assemble()
-        ai, aj, av = stiffness.getValuesCSR()
-        stiffness_tensor = torch.sparse_csr_tensor(ai, aj, av, dtype = torch.float, device = self._device, requires_grad=True)
-        # stiffness = stiffness.convert("dense")
-        # stiffness_mat = stiffness.getDenseArray()
-        load = assemble_vector(problem.L)
-        load.assemble()
-        load_vec = load.getArray()
-        load_vec_tensor = torch.tensor(load_vec, dtype = torch.float, device = self._device, requires_grad=True)
-        res = torch.mean((stiffness_tensor @ next_temp - load_vec_tensor)**2)
-        return res
-
-    def pde_loss(self, network_output, graph) :
-        laplacian = cotangent_laplacian_tetrahedral(graph.mesh_pos, graph.cells)
-        output_normalizer = self.get_output_normalizer()
-        delta_temperature = output_normalizer.inverse(network_output)
-        laplacian_T = torch.sparse.mm(laplacian, graph.temperature.squeeze(0))
-        rhocp = lambda T: 8351.910158 * (446.337248 + 0.14180844 * (T-273) - 61.431671211432 * np.e ** (-0.00031858431233904*((T-273)-525)**2) + 1054.9650568*np.e **(-0.00006287810196136*((T-273)-1545)**2))
-        k = lambda T: 25   # W/(m·K)
-        lhs = rhocp(graph.temperature.squeeze(0)) * delta_temperature/self._timestep
-        rhs = k(graph.temperature.squeeze(0)) * laplacian_T + graph.heat_source.squeeze(0)
-        res = (lhs - rhs)**2
-        return torch.mean(res)
+        return torch.mean(loss)
     
     def save_model(self, path):
         torch.save(self.state_dict(), os.path.join(path, "model_weights.pth"))
@@ -265,65 +236,41 @@ class EncodeProcessDecode(torch.nn.Module):
             )
         return mesh_edge_features
 
-def cotangent_laplacian_tetrahedral(mesh_pos, tets):
-    """
-    mesh_pos: [N, 3] (float tensor) - vertex positions
-    tets: [M, 4] (long tensor) - tetrahedral connectivity (indices into mesh_pos)
-    returns: sparse Laplacian matrix [N, N] in torch.sparse_coo_tensor format
-    """
-    assert mesh_pos.shape[-1] == 3, "Tetrahedral meshes require 3D positions"
-    mesh_pos = mesh_pos.squeeze(0)
-    tets = tets.squeeze(0)
-    # Indices for tetrahedron vertices
-    i0, i1, i2, i3 = tets[:, 0], tets[:, 1], tets[:, 2], tets[:, 3]
-    v0, v1, v2, v3 = mesh_pos[i0], mesh_pos[i1], mesh_pos[i2], mesh_pos[i3]
+def tetra_volume(v0, v1, v2, v3):
+    return torch.abs(torch.einsum('ij,ij->i', v1 - v0, torch.cross(v2 - v0, v3 - v0))) / 6.0
 
-    def face_cotangent(p0, p1, p2, opposite):
-        """
-        Compute cotangent weight for a face (p0, p1, p2) with opposite vertex.
-        This is based on the angle between the face normal and the opposite vertex.
-        """
-        # Face normal
-        n = torch.cross(p1 - p0, p2 - p0, dim=1)
-        n_norm = torch.norm(n, dim=1).clamp(min=1e-8)
-        # Vector from face to opposite point
-        vol_vec = opposite - p0
-        height = (vol_vec * n).sum(dim=1).abs() / n_norm
-        area = 0.5 * n_norm
-        # Cotangent approximation: height / area ~ cot(angle)
-        return 0.5 * height / area
+def grad_phi_matrix(verts, device):  # verts: (M, 4, 3)
+    v0, v1, v2, v3 = verts[:, 0], verts[:, 1], verts[:, 2], verts[:, 3]
 
-    # For each face in the tetrahedron (4 faces per tetrahedron), compute cotangent weights
-    cot01_2 = face_cotangent(v0, v1, v2, v3)
-    cot01_3 = face_cotangent(v0, v1, v3, v2)
-    cot02_3 = face_cotangent(v0, v2, v3, v1)
-    cot12_3 = face_cotangent(v1, v2, v3, v0)
+    # Matrix D = [v1 - v0, v2 - v0, v3 - v0] — shape (M, 3, 3)
+    D = torch.stack([v1 - v0, v2 - v0, v3 - v0], dim=2)  # (M, 3, 3)
+    Dinv = torch.linalg.inv(D)  # (M, 3, 3)
 
-    rows = torch.cat([i0, i0, i0, i1, i1, i2])
-    cols = torch.cat([i1, i2, i3, i2, i3, i3])
-    weights = torch.cat([
-        cot01_2 + cot01_3,  # (i0, i1)
-        cot01_2 + cot02_3,  # (i0, i2)
-        cot01_3 + cot02_3,  # (i0, i3)
-        cot01_2 + cot12_3,  # (i1, i2)
-        cot01_3 + cot12_3,  # (i1, i3)
-        cot02_3 + cot12_3   # (i2, i3)
-    ]) * 0.5
+    # Gradients of barycentric basis functions
+    grads = torch.zeros((verts.shape[0], 4, 3), dtype=torch.float32, device = device)
+    grads[:, 1:] = Dinv.permute(0, 2, 1)
+    grads[:, 0] = -grads[:, 1:].sum(dim=1)
+    return grads  # shape (M, 4, 3)
 
-    # Since Laplacian is symmetric, duplicate for transpose entries
-    all_rows = torch.cat([rows, cols])
-    all_cols = torch.cat([cols, rows])
-    all_weights = torch.cat([weights, weights])
+def fem_laplacian_tetra(V, T, u, device):
+    N = V.shape[0]
+    M = T.shape[0]
 
-    n = mesh_pos.shape[0]
-    L_off = torch.sparse_coo_tensor(torch.stack([all_rows, all_cols]), all_weights, size=(n, n))
+    verts = V[T]  # shape (M, 4, 3)
+    grads = grad_phi_matrix(verts, device)  # shape (M, 4, 3)
+    vol = tetra_volume(*verts.permute(1, 0, 2))  # shape (M,)
 
-    # Diagonal entries
-    diag_vals = torch.zeros(n, dtype=all_weights.dtype, device=all_weights.device).index_add(0, all_rows, all_weights)
-    diag_indices = torch.arange(n, device=mesh_pos.device)
-    L_diag = torch.sparse_coo_tensor(
-        torch.stack([diag_indices, diag_indices]), -diag_vals, size=(n, n)
-    )
+    lap = torch.zeros(N, dtype=torch.float32, device = device)
+    mass = torch.zeros(N, dtype=torch.float32, device = device)
 
-    L = L_off + L_diag
-    return L.coalesce()
+    for a in range(4):
+        for b in range(4):
+            # Local stiffness: grad phi_a · grad phi_b * volume
+            contrib = (grads[:, a] * grads[:, b]).sum(dim=1) * vol
+            if a == b:
+                mass.index_add_(0, T[:, a], vol / 4)  # lumped mass
+            lap.index_add_(0, T[:, a], contrib * (u[T[:, b]] - u[T[:, a]]))
+
+    lap /= (mass + 1e-8)
+    return lap
+

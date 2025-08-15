@@ -48,7 +48,8 @@ class LPBFDataset(Dataset):
                 target_temperature_t = target_temperature[idx]
                 heat_source_t = heat_source[idx]
                 if self.add_noise :
-                    temperature_noise_scale = (torch.max(temperature) - torch.min(temperature)) * self.add_noise
+                    temperature_noise_scale = (torch.max(temperature) - torch.min(temperature)) * 0.05
+                    heat_source_noise_scale = (torch.max(heat_source) - torch.min(heat_source)) * 0
                     temperature_noise = torch.zeros_like(temperature_t) + temperature_noise_scale * torch.randn_like(temperature_t)
                     temperature_t += temperature_noise
                 frame = Data(temperature = temperature_t.unsqueeze(0), 

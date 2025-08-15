@@ -12,15 +12,7 @@ from torch.nn import Sequential, Linear, ReLU, LayerNorm
 from torch_geometric.nn import MessagePassing
 from torch_geometric.data import Data
 import time
-from .utils import create_mesh_from_arrays
-from mpi4py import MPI
-import dolfinx
-import ufl
-import basix.ufl
-from dolfinx.fem.petsc import LinearProblem
-from dolfinx.fem.petsc import assemble_matrix, assemble_vector
-import numpy as np
-from scipy.sparse import coo_matrix
+
 class Swish(torch.nn.Module):
     """
     Swish activation function
@@ -184,27 +176,12 @@ class EncodeProcessDecode(torch.nn.Module):
         loss_mask = node_type == 0                             # (num_nodes,)
 
         error = (output - target_temp_normalized) ** 2               # (num_nodes,)
-        loss = torch.max(error[:, loss_mask.squeeze(0), :], dim = 1).values      # scalar
-        return torch.mean(loss)
-
-    def physic_loss(self, network_output, graph) :
-        normalizer = self.get_output_normalizer()
-        # delta_temperature = network_output
-        cur_temp = graph.temperature
-        k = lambda T: 25
-        rhocp = lambda T: 8351.910158 * (446.337248 + 0.14180844 * (T-273) - 61.431671211432 * np.e ** (-0.00031858431233904*((T-273)-525)**2) + 1054.9650568*np.e **(-0.00006287810196136*((T-273)-1545)**2))
-        dt_window = torch.arange(1, self._time_window + 1).repeat_interleave(self._output_size).to(self._device) * self._timestep
-        temp_laplacian = fem_laplacian_tetra(graph.mesh_pos.squeeze(0), graph.cells.squeeze(0), cur_temp.squeeze(0).squeeze(-1), self._device)
-        physical = 1/rhocp(cur_temp) * (k(cur_temp) * temp_laplacian.unsqueeze(0).unsqueeze(-1) + graph.heat_source)
-        delta_T_physic_onestep = normalizer(dt_window.reshape(-1, 1, 1) * physical)
-
-        node_type = graph.node_type                            # (num_nodes,)
-        loss_mask = node_type == 0                             # (num_nodes,)
-
-        error = (network_output - delta_T_physic_onestep) ** 2               # (num_nodes,)
-        loss = torch.mean(error[:, loss_mask.squeeze(0), :], dim = 1)      # scalar
-
-        return torch.mean(loss)
+        loss = torch.sum(error[loss_mask], dim = 0)      # scalar
+        return torch.sum(loss) / self._time_window
+    def fem_physical_loss(self, network_output, graph) :
+        return # to be developed
+    def pde_physical_loss(self, network_output, graph) :
+        return # to be developed
     
     def save_model(self, path):
         torch.save(self.state_dict(), os.path.join(path, "model_weights.pth"))
@@ -236,41 +213,62 @@ class EncodeProcessDecode(torch.nn.Module):
             )
         return mesh_edge_features
 
-def tetra_volume(v0, v1, v2, v3):
-    return torch.abs(torch.einsum('ij,ij->i', v1 - v0, torch.cross(v2 - v0, v3 - v0))) / 6.0
+    def compute_tetra_transient_residual(
+        node_coords, connectivity, T, T_prev, Q, dt,
+        rho=1.0, cp=1.0, k=1.0
+    ):
+        """
+        Compute residuals per element-node for transient heat equation (weak form) using PyTorch.
 
-def grad_phi_matrix(verts, device):  # verts: (M, 4, 3)
-    v0, v1, v2, v3 = verts[:, 0], verts[:, 1], verts[:, 2], verts[:, 3]
+        All inputs must be torch tensors on the same device.
+        T and T_prev: (N_nodes,) with requires_grad=True for T
+        Returns: (N_elements, 4) residuals
+        """
+        N_elements = connectivity.shape[0]
+        device = T.device
+        element_residuals = []
 
-    # Matrix D = [v1 - v0, v2 - v0, v3 - v0] — shape (M, 3, 3)
-    D = torch.stack([v1 - v0, v2 - v0, v3 - v0], dim=2)  # (M, 3, 3)
-    Dinv = torch.linalg.inv(D)  # (M, 3, 3)
+        for e in range(N_elements):
+            elem = connectivity[e]
+            n = elem
+            coords = node_coords[n]     # (4, 3)
+            Te = T[n]                   # (4,)
+            Tpe = T_prev[n]             # (4,)
+            Qe = Q[n]                   # (4,)
 
-    # Gradients of barycentric basis functions
-    grads = torch.zeros((verts.shape[0], 4, 3), dtype=torch.float32, device = device)
-    grads[:, 1:] = Dinv.permute(0, 2, 1)
-    grads[:, 0] = -grads[:, 1:].sum(dim=1)
-    return grads  # shape (M, 4, 3)
+            # Build shape function matrix
+            X = torch.ones((4, 4), device=device)
+            X[:, 1:] = coords
 
-def fem_laplacian_tetra(V, T, u, device):
-    N = V.shape[0]
-    M = T.shape[0]
+            detJ = torch.det(X)
+            volume = torch.abs(detJ) / 6.0
 
-    verts = V[T]  # shape (M, 4, 3)
-    grads = grad_phi_matrix(verts, device)  # shape (M, 4, 3)
-    vol = tetra_volume(*verts.permute(1, 0, 2))  # shape (M,)
+            # Compute shape gradients
+            grads = torch.zeros((4, 3), device=device)
+            for i in range(4):
+                mat = torch.cat([X[:i], X[i+1:]], dim=0)
+                sign = -1 if i % 2 else 1
+                grads[i, 0] = sign * torch.det(mat[:, [1, 2, 3]])
+                grads[i, 1] = sign * torch.det(mat[:, [0, 2, 3]])
+                grads[i, 2] = sign * torch.det(mat[:, [0, 1, 3]])
+            grads /= detJ  # ∇N_i
 
-    lap = torch.zeros(N, dtype=torch.float32, device = device)
-    mass = torch.zeros(N, dtype=torch.float32, device = device)
+            # Compute ∇T and ∂T/∂t
+            grad_T = grads.T @ Te  # ∇T
+            dT_dt = (Te - Tpe) / dt
 
-    for a in range(4):
-        for b in range(4):
-            # Local stiffness: grad phi_a · grad phi_b * volume
-            contrib = (grads[:, a] * grads[:, b]).sum(dim=1) * vol
-            if a == b:
-                mass.index_add_(0, T[:, a], vol / 4)  # lumped mass
-            lap.index_add_(0, T[:, a], contrib * (u[T[:, b]] - u[T[:, a]]))
+            Ni = torch.ones(4, device=device) / 4  # shape fn at centroid
+            Q_avg = torch.mean(Qe)
 
-    lap /= (mass + 1e-8)
-    return lap
+            # Residual per node in element
+            res = torch.zeros(4, device=device)
+            for i in range(4):
+                term_time = rho * cp * Ni[i] * torch.mean(dT_dt)
+                term_diff = grads[i] @ (k * grad_T)
+                term_source = Ni[i] * Q_avg
+                res[i] = (term_time + term_diff - term_source) * volume
+
+            element_residuals.append(res)
+
+        return torch.stack(element_residuals)
 

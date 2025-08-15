@@ -5,11 +5,6 @@ from pathlib import Path
 import time
 import datetime
 import os
-import ufl
-import basix.ufl
-import numpy as np
-import dolfinx
-from mpi4py import MPI
 
 def tetrahedral_to_edges(faces):
     """Computes mesh edges from triangles."""
@@ -125,33 +120,3 @@ def save_dict_to_pkl(data_dict, file_path):
 def load_dict_from_pkl(file_path):
     with open(file_path, 'rb') as f:
         return pickle.load(f)
-    
-def create_mesh_from_arrays(node_position, node_connectivity, cell_type_name, gdim):
-    """
-    Creates a FEniCSx mesh from node positions and connectivity.
-
-    Args:
-        node_position (np.ndarray): A NumPy array of shape (num_nodes, gdim) 
-                                    containing the coordinates of the nodes.
-        node_connectivity (np.ndarray): A NumPy array of shape (num_cells, num_vertices_per_cell)
-                                        containing the global indices of the nodes for each cell.
-        cell_type_name (str): The name of the cell type (e.g., "triangle", "tetrahedron").
-        gdim (int): The geometric dimension of the mesh (2 for 2D, 3 for 3D).
-
-    Returns:
-        dolfinx.mesh.Mesh: The created FEniCSx mesh object.
-    """
-    
-    # Ensure arrays have correct data types
-    node_position = np.asarray(node_position, dtype=np.float64, order='C')
-    node_connectivity = np.asarray(node_connectivity, dtype=np.int64, order='C')
-
-    # Define the UFL cell (geometric element)
-    # The degree of the geometric element should usually be 1 for linear meshes
-    # The shape parameter corresponds to the geometric dimension of the nodes.
-    ufl_domain = ufl.Mesh(basix.ufl.element("Lagrange", cell_type_name, 1, shape=(gdim,)))
-
-    # Create the DOLFINx mesh
-    mesh = dolfinx.mesh.create_mesh(MPI.COMM_WORLD, node_connectivity, node_position, ufl_domain)
-    
-    return mesh

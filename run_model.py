@@ -11,80 +11,42 @@ import numpy as np
 from tqdm import tqdm
 from core.utils import * 
 from run_rollout import rollout
-import argparse
-import yaml
+# def load_dataset( , add_target = False, add_noise = False, split = False) :
+#     file_path = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/npz_files/weld_fem_60mm.npz"
+#     dataset = np.load(file_path)
 
-device = "cuda"
+#     data = Data()
+#     return 
+
+# def learner() :
     
-def load_config(yaml_path):
-    with open(yaml_path, 'r') as f:
-        return yaml.safe_load(f)
+device = "cuda"
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train GNN model with YAML config.")
-    parser.add_argument('--config', type=str, help='Path to the YAML config file', default="./train_config.yml")
-    return parser.parse_args()
-
-if __name__ == "__main__":
-    args = parse_args()
-    config = load_config(args.config)
-
-    device = config["device"]
-    data_dir = config["paths"]["data_dir"]
-    output_dir = config["paths"]["output_dir"]
-    model_dir = config["paths"].get("model_dir", None)
-
+if __name__ == "__main__" :
+    
+    data_dir = r"/home/y0113799/Hiwi/Heat_MGN/groundtruth"
+    output_dir = r"/home/y0113799/Hiwi/Heat_MGN/output"
     run_dir = prepare_directories(output_dir)
-    model_dir = model_dir or os.path.join(run_dir, 'model_checkpoint')
+    model_dir = os.path.join(run_dir, 'model_checkpoint')
     logs_dir = os.path.join(run_dir, "logs")
     logger_setup(os.path.join(logs_dir, "logs.txt"))
     logger = logging.getLogger()
-
-    time_window = int(config["training"]["time_window"])
-    add_noise = float(config["training"]["add_noise"])  # Optional: could read from config["training"]["add_noise"]
-    alpha = float(config["training"]["alpha"])
-    beta = float(config["training"]["beta"])
-
-    train_dataset = LPBFDataset(
-        data_dir,
-        add_targets=True,
-        split_frames=True,
-        add_noise=add_noise,
-        time_window=time_window
-    )
-
-    val_dataset = LPBFDataset(
-        data_dir,
-        add_targets=False,
-        split_frames=False,
-        add_noise=None,
-        time_window=time_window
-    )
-
-    model = EncodeProcessDecode(
-        node_feature_size=config["model"]["node_feature_size"],
-        mesh_edge_feature_size=config["model"]["mesh_edge_feature_size"],
-        output_size=config["model"]["output_size"],
-        latent_size=config["model"]["latent_size"],
-        timestep=float(config["model"]["timestep"]),
-        time_window=time_window,
-        device=device,
-        message_passing_steps=config["training"]["message_passing_steps"],
-        attention=config["training"]["attention"]
-    )
-
+    time_window = 10
+    dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = True, time_window = time_window)
+    model = EncodeProcessDecode(node_feature_size = 3,
+                                mesh_edge_feature_size = 5,
+                                output_size = 1,
+                                latent_size = 128,
+                                timestep=1e-5,
+                                time_window=time_window,
+                                device=device,
+                                message_passing_steps = 15)
     model.to(device)
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=float(config["training"]["learning_rate"]),
-        weight_decay=float(config["training"]["weight_decay"])
-    )
-
-    num_epochs = config["training"]["num_epochs"]
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=5e-3)
+    num_epochs = 100
     train_loss_per_epochs = []
     is_accumulate_normalizer_phase = True
     best_val_loss = float('inf')
-
     for epoch in range(num_epochs):
         model.train()
         train_total_loss = 0
@@ -92,24 +54,20 @@ if __name__ == "__main__":
         for traj_idx, trajectory in enumerate(train_dataset):  # assuming dataset.trajectories exists
             train_loader = DataLoader(trajectory, batch_size=1, shuffle=True)
             loop = tqdm(enumerate(train_loader), total=len(train_loader), leave=False)
-            trajectory_loss = 0
+
             for idx_traj, batch in loop:
                 batch = batch.to(device)
                 optimizer.zero_grad()
                 predictions = model(batch)
-                data_loss = model.loss(predictions, batch)
-                physic_loss = model.physic_loss(predictions, batch)
-                loss = alpha * data_loss + beta * physic_loss
+                loss = model.loss(predictions, batch)
+
                 if not is_accumulate_normalizer_phase:
                     loss.backward()
                     optimizer.step()
-                    trajectory_loss += loss.item()
-                    loop.set_description(f"Epoch {epoch + 1} Traj {traj_idx + 1}/{len(train_dataset)}")
+                    train_total_loss += loss.item()
+                    loop.set_description(f"Epoch {epoch + 1} Traj {traj_idx + 1}/{len(dataset)}")
                     loop.set_postfix({"Loss": f"{loss.item():.4f}"})
-                                    #   "data loss": f"{data_loss.item():.4f}",
-                                    #   "pde loss": f"{pde_loss.item():.4f}"})
-            train_total_loss += trajectory_loss
-            logger.info(f"Epoch {epoch+1}, Trajectory {traj_idx+1}: Loss = {train_total_loss:.4f}")
+                    logger.info(f"Epoch {epoch+1}, Trajectory {traj_idx+1}, Step {idx_traj+1}: Loss = {loss.item():.4f}")
 
             # Rollout/Validation after each trajectory
         if not is_accumulate_normalizer_phase:

@@ -72,8 +72,10 @@ def rollout(model, data, time_window, device="cuda"):
     timesteps = len(data["temperature"])
 
     curr_graph = initial_state.clone()  # Start with first ground truth graph
-    pred_temperature_list = [curr_graph.temperature.to(device)]
-    progress = tqdm(range(0, timesteps, time_window), desc="Rollout")
+    mse_tensor = torch.zeros((1,), device = model._device)
+    pred_temperature_tensor = curr_graph.temperature.to(model._device)
+    gt_temperature_tensor = curr_graph.temperature.to(model._device)
+    progress = tqdm(range(0, timesteps - time_window, time_window), desc="Rollout")
 
     for t in progress:
         # === Predict next time_window temperatures ===
@@ -83,11 +85,14 @@ def rollout(model, data, time_window, device="cuda"):
             curr_graph.temperature = pred_temp[-1:] # use last timestep prediction for next input
         pred_temperature_list.append(pred_temp)
         # === Ground truth from data[t+1] to data[t+time_window] ===
-    pred_temperature_tensor = torch.cat(pred_temperature_list, dim=0)[:timesteps]
-    gt_temperature = data.temperature
-    temp_error = torch.sqrt(torch.mean(torch.sum((pred_temperature_tensor - gt_temperature)**2, dim = 2), dim = 1))
-    percentage_temp_error = torch.sqrt(torch.mean(torch.sum((1 - pred_temperature_tensor/gt_temperature)**2, dim = 2), dim = 1))
-    print("temp_error: ", torch.mean(temp_error).item(), "percentage_temp_error: ", torch.mean(percentage_temp_error).item())
+        gt_temp = data[t].target_temperature.to(device)
+        window_mse = torch.mean((pred_temp - gt_temp) ** 2, dim=0)
+        mse_tensor = torch.cat([mse_tensor, window_mse])  # (time_window,)
+        pred_temperature_tensor = torch.cat([pred_temperature_tensor, pred_temp], dim=1)
+        gt_temperature_tensor = torch.cat([gt_temperature_tensor, gt_temp], dim=1)
+
+        print(f"[t={t}] max temp: {torch.max(pred_temp):.4f} | MSE: {torch.mean(window_mse):.4f}")
+
     return dict(
         mesh_pos=initial_state.mesh_pos,
         node_type=initial_state.node_type,
@@ -183,7 +188,7 @@ def plot_max_temperature_over_time(pred_temp, gt_temp, rmse_temp, time_step=1e-5
     plt.show()
 
 if __name__ == "__main__" :
-    test_on = "triple132"
+    test_on = "triple321"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T112913"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016"
     # data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250430T113333"
@@ -197,12 +202,10 @@ if __name__ == "__main__" :
     # logger_setup(os.path.join(logs_dir, "logs.txt"))
     # logger = logging.getLogger()
     time_window = 10
-    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-07-08T22h14m17s/model_checkpoint"
-    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-07-01T15h21m20s/model_checkpoint"
-    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-07-15T16h29m11s/model_checkpoint"
-    dataset = LPBFDataset(data_dir, add_targets= False, split_frames=False, add_noise = None, time_window=time_window)
-    data = dataset[0]
-    model = EncodeProcessDecode(node_feature_size = 2,
+    model_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/trained_model/2025-05-09T12h23m14s/model_checkpoint"
+    dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = False, time_window=time_window)
+    data = dataset[1]
+    model = EncodeProcessDecode(node_feature_size = 3,
                                 mesh_edge_feature_size = 5,
                                 output_size = 1,
                                 latent_size = 128,
@@ -217,7 +220,7 @@ if __name__ == "__main__" :
     model = torch.compile(model)
     # Training loop
     output = rollout(model, data, time_window)
-    np.savez(os.path.join(output_dir, f"rollout.npz"), output)
+    # save_dict_to_pkl(output, os.path.join(output_dir, f"{test_on}.pkl"))
     # plot_max_temperature_over_time(output["predict_temperature"], 
     #                                output["gt_temperature"], 
     #                                output["rmse_list"],

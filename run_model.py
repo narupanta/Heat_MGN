@@ -1,101 +1,187 @@
-import numpy as np
-from torch_geometric.data import Data
-import json
+# training routine for the GNN model
 import torch
-from torch_geometric.data import Data, Dataset
+import torch.optim as optim
+from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
-import os
 from core.datasetclass import LPBFDataset
-from core.model_graphnet import EncodeProcessDecode
-import numpy as np
+from core.meshgraphnet import EncodeProcessDecode   
+from core.rollout import rollout
 from tqdm import tqdm
-from core.utils import * 
-from run_rollout import rollout
-# def load_dataset( , add_target = False, add_noise = False, split = False) :
-#     file_path = r"/home/narupanta/Hiwi/weld-simulation-pinn/weld-simulation-pinn/npz_files/weld_fem_60mm.npz"
-#     dataset = np.load(file_path)
+import os
+import yaml
+from datetime import datetime
+import logging
 
-#     data = Data()
-#     return 
 
-# def learner() :
+def noise_schedule(epoch, total_epochs, initial_noise=0.1, final_noise=0.01):
+    """Linear noise schedule from initial_noise to final_noise over total_epochs."""
+    if epoch >= total_epochs:
+        return final_noise
+    return initial_noise + (final_noise - initial_noise) * (epoch / total_epochs)
+
+def log_model_parameters(model):
+    total_params = 0
+    total_trainable = 0
+
+    logger.info("===== Model Parameters =====")
+    for name, param in model.named_parameters():
+        num_params = param.numel()
+        total_params += num_params
+        if param.requires_grad:
+            total_trainable += num_params
+        logger.info(f"{name}: {param.size()} | params={num_params} | requires_grad={param.requires_grad}")
+
+    logger.info(f"Total parameters: {total_params}")
+    logger.info(f"Trainable parameters: {total_trainable}")
+    logger.info("============================")
+
+if __name__ == "__main__":
+    # read model and training parameters from config yml file if exists
+    config_path = "train_config.yml"
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        # override model and training parameters if specified in config file
+        node_in_dim = config["model"]["node_in_dim"]
+        edge_in_dim = config["model"]["edge_in_dim"]
+        hidden_size = config["model"]["hidden_size"]
+        process_steps = config["model"]["process_steps"]
+        node_out_dim = config["model"]["node_out_dim"]
+        attention = config["model"]["attention"]
+        time_window = config["model"]["time_window"]
+
+        learning_rate = float(config["training"]["learning_rate"])
+        weight_decay = float(config["training"].get("weight_decay", 1e-5))
+        num_epochs = config["training"]["num_epochs"]
+        start_noise = config["training"]["start_noise_level"]
+        end_noise = config["training"]["end_noise_level"]
+        save_model_dir = config["paths"].get("save_model_dir", './trained_models')
+        data_dir = config["paths"]["data_dir"]
+
+        # save the config file in model_dir for future reference
+        now = datetime.now()
+        dt_string = now.strftime("%Y%m%dT%H%M%S")
+        model_dir = os.path.join(save_model_dir, dt_string)
+        os.makedirs(model_dir, exist_ok=True)
+        print(f"Model will be saved in {model_dir}")
+        with open(os.path.join(model_dir, 'config.yml'), 'w') as f:
+            yaml.dump(config, f)
+
+    # --- Setup logging ---
+    log_file = os.path.join(model_dir, "log.txt")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+    logger = logging.getLogger("train")
+
+    dataset = LPBFDataset(
+        data_dir = data_dir,
+        add_target = True,
+        noise_level = noise_schedule(0, num_epochs, initial_noise=start_noise, final_noise=end_noise),
+        time_window = time_window
+    )
+
+    rollout_dataset = LPBFDataset(data_dir=data_dir, add_target = False, noise_level=0.0, time_window = time_window)
+
     
-device = "cuda"
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = EncodeProcessDecode(
+        node_in_dim=node_in_dim,
+        edge_in_dim=edge_in_dim,
+        hidden_size=hidden_size,
+        process_steps=process_steps,
+        node_out_dim=node_out_dim,
+        attention=attention,
+        time_window=time_window,
+        device=device
+    ).to(device)
+    # --- Example usage ---
+    # Suppose `model` is your PyTorch model
+    log_model_parameters(model)
+    # Optimizer
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=learning_rate,
+        weight_decay=config.get("weight_decay", 1e-5)
+    )
 
-if __name__ == "__main__" :
-    
-    data_dir = r"/home/y0113799/Hiwi/Heat_MGN/groundtruth"
-    output_dir = r"/home/y0113799/Hiwi/Heat_MGN/output"
-    run_dir = prepare_directories(output_dir)
-    model_dir = os.path.join(run_dir, 'model_checkpoint')
-    logs_dir = os.path.join(run_dir, "logs")
-    logger_setup(os.path.join(logs_dir, "logs.txt"))
-    logger = logging.getLogger()
-    time_window = 10
-    dataset = LPBFDataset(data_dir, add_targets= True, split_frames=True, add_noise = True, time_window = time_window)
-    model = EncodeProcessDecode(node_feature_size = 3,
-                                mesh_edge_feature_size = 5,
-                                output_size = 1,
-                                latent_size = 128,
-                                timestep=1e-5,
-                                time_window=time_window,
-                                device=device,
-                                message_passing_steps = 15)
-    model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=5e-3)
-    num_epochs = 100
-    train_loss_per_epochs = []
-    is_accumulate_normalizer_phase = True
+    # Scheduler (optional: cosine annealing works well for GNNs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=num_epochs,
+        eta_min=1e-6
+    )
+
     best_val_loss = float('inf')
-    for epoch in range(num_epochs):
+    for train_epoch in range(num_epochs):
         model.train()
-        train_total_loss = 0
-        val_total_loss = 0
-        for traj_idx, trajectory in enumerate(train_dataset):  # assuming dataset.trajectories exists
-            train_loader = DataLoader(trajectory, batch_size=1, shuffle=True)
-            loop = tqdm(enumerate(train_loader), total=len(train_loader), leave=False)
-
-            for idx_traj, batch in loop:
+        total_loss = 0.0
+        dataset.noise_level = noise_schedule(train_epoch, num_epochs, initial_noise=start_noise, final_noise=end_noise)
+        for traj_idx, data in enumerate(dataset):
+            traj_total_loss = 0
+            train_loader = DataLoader(data, batch_size=1, shuffle=True)
+            loop = tqdm(train_loader, leave=False)
+            for batch in loop:
                 batch = batch.to(device)
                 optimizer.zero_grad()
-                predictions = model(batch)
-                loss = model.loss(predictions, batch)
+                loss, mse, smoothness_loss = model.loss(batch)
+                loss.backward()
+                optimizer.step()
+                traj_total_loss += loss.item()
+                loop.set_description(f"Epoch {train_epoch + 1}, Traj {traj_idx + 1}")
+                loop.set_postfix({
+                        "Loss": f"{loss.item():.4f}",
+                        "MSE": f"{mse.item():.4f}",
+                        "Smoothness Loss": f"{smoothness_loss.item():.4f}"
+                    })
+            total_loss += traj_total_loss
+            logger.info(
+                f"Epoch {train_epoch + 1}, Trajectory {traj_idx + 1}: Train Loss: {traj_total_loss:.4f} "
+            )
 
-                if not is_accumulate_normalizer_phase:
-                    loss.backward()
-                    optimizer.step()
-                    train_total_loss += loss.item()
-                    loop.set_description(f"Epoch {epoch + 1} Traj {traj_idx + 1}/{len(dataset)}")
-                    loop.set_postfix({"Loss": f"{loss.item():.4f}"})
-                    logger.info(f"Epoch {epoch+1}, Trajectory {traj_idx+1}, Step {idx_traj+1}: Loss = {loss.item():.4f}")
 
-            # Rollout/Validation after each trajectory
-        if not is_accumulate_normalizer_phase:
-            val_total_loss = 0.0
-            for traj_idx, trajectory in enumerate(val_dataset):
-                output = rollout(model, trajectory, time_window)
-                temp_rmse = torch.mean(output["temp_rmse"])
-                percentage_temp_rmse = torch.mean(output["percentage_temp_rmse"])
-                val_loss = percentage_temp_rmse
-                val_total_loss += val_loss.item()
+        avg_loss = total_loss / len(dataset)
+        # Log training loss
+        logger.info(
+            f"Epoch {train_epoch + 1}, "
+            f"Train Loss: {avg_loss:.6f}"
+        )
 
+        scheduler.step()
+        model.eval()
+        total_rollout_loss = 0.0
+        num_rollouts = 0
+        with torch.no_grad():
+            for trajectory in rollout_dataset:
+                rollout_result = rollout(model, trajectory)
+                rmse_T = rollout_result["rmse_T"]
+                total_rollout_loss += rmse_T
+                num_rollouts += 1
                 logger.info(
-                    f"Val Traj {traj_idx + 1}: percentage temperature error: {val_loss:.6e}, temp_rmse: {temp_rmse:.4f}"
-                )
-            avg_train_loss = train_total_loss / len(train_dataset)
-            avg_val_loss = val_total_loss / len(val_dataset)
+                f"Rollout Nr.{num_rollouts} Loss: {rmse_T:.6f}"
+            )
+        avg_rollout_loss = total_rollout_loss / max(1, num_rollouts)
 
-            logger.info(f"Epoch {epoch + 1} Summary - Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.6e}")
-            print(f"[Epoch {epoch + 1}/{num_epochs}] Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.6e}")
-            
-            avg_train_loss = train_total_loss / len(train_dataset)
-            train_loss_per_epochs.append(avg_train_loss)
-            if val_total_loss < best_val_loss:
-                best_val_loss = val_total_loss
-                model.save_model(model_dir)
-                torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer_state_dict.pth"))
-                logger.info("Checkpoint saved (best model so far).")
-            print(f"Epoch {epoch + 1}/{num_epochs}, loss: {avg_train_loss:.4f}")
-        else:
-            is_accumulate_normalizer_phase = False
+        logger.info(
+            f"Rollout Loss: {avg_rollout_loss:.6f}"
+        )
 
+        # Save best model
+        if avg_rollout_loss < best_val_loss:
+            best_val_loss = avg_rollout_loss
+            best_model_dir = os.path.join(model_dir, "best_model")
+            os.makedirs(best_model_dir, exist_ok=True)
+            model.save_model(best_model_dir)
+            logger.info("best rollout model saved")
+
+        # Save checkpoint every 20 epochs
+        if (train_epoch + 1) % 20 == 0:
+            epoch_model_dir = os.path.join(model_dir, f"epoch_{train_epoch+1}")
+            os.makedirs(epoch_model_dir, exist_ok=True)
+            model.save_model(epoch_model_dir)
+            logger.info("epoch model saved")

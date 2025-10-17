@@ -55,11 +55,12 @@ def create_msh_file(output_dir, name, cube: Cube, size_min, dist_min, y_offset, 
     gmsh.model.mesh.field.setNumbers(distance_field, "EdgesList", tracks)
 
     threshold_field = gmsh.model.mesh.field.add("Threshold")
+    size_mul = 1
     gmsh.model.mesh.field.setNumber(threshold_field, "InField", distance_field)
     gmsh.model.mesh.field.setNumber(threshold_field, "SizeMin", size_min)
-    gmsh.model.mesh.field.setNumber(threshold_field, "SizeMax", size_min * 5)
+    gmsh.model.mesh.field.setNumber(threshold_field, "SizeMax", size_min * size_mul)
     gmsh.model.mesh.field.setNumber(threshold_field, "DistMin", dist_min)
-    gmsh.model.mesh.field.setNumber(threshold_field, "DistMax", dist_min * 5)
+    gmsh.model.mesh.field.setNumber(threshold_field, "DistMax", dist_min * size_mul)
 
     gmsh.model.mesh.field.setAsBackgroundMesh(threshold_field)
 
@@ -77,4 +78,4 @@ def create_msh_file(output_dir, name, cube: Cube, size_min, dist_min, y_offset, 
     return os.path.join(output_dir, f"{geometry_name}.msh")
 # Example usage
 if __name__ == "__main__":
-    create_msh_file("./geometry/cube", Cube(2e-3, 2e-3, 1e-3), 0.04e-3, 0.25e-3, 1)
+    create_msh_file("/mnt/c/Users/narun/Desktop/Project/Heat_MGN/geometry","cube", Cube(2e-3, 2e-3, 1e-3), 0.1e-3, 0.25e-3, 0.0, 1)

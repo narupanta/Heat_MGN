@@ -12,15 +12,15 @@ import time
 # -----------------------------
 # Transient 2D Heat Conduction with Enthalpy, Moving Heat Source, Convection & Radiation
 # -----------------------------
-cube = Cube(2e-3, 4e-3, 1e-3)
+cube = Cube(2e-3, 2e-3, 1e-3)
 
-size_min = 0.04e-3
+size_min = 0.1e-3
 dist_min = 0.25e-3
-y_offset = 0
-num_track = 1
-track_order = [1]  # Custom order (1-based index)
+y_offset = 0.0
+num_track = 2
+track_order = [1,2]  # Custom order (1-based index)
 assert len(track_order) == num_track and set(track_order) == set(range(1, num_track + 1))
-geometry_dir = "/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/geometry"
+geometry_dir = "/mnt/c/Users/narun/Desktop/Project/Heat_MGN/geometry"
 output_dir = "./groundtruth/"
 # --- Geometry & Mesh ---
 input_geometry_path = create_msh_file(geometry_dir, "cube", cube, size_min, dist_min, y_offset, num_track)
@@ -74,11 +74,12 @@ radius = source_width/2
 cf, cr = radius, radius
 ff, fr = 2/(1 + cr/cf), 2/(1 + cf/cr)
 pen_depth = 0.5e-3 # m
-dt = 1e-5 # s
+dt = 5e-5 # s
 T_heat = cube.length * 0.5/source_speed * num_track
-T_total = T_heat * 3 # s
-def moving_heat_source(x, y_center, t):
-    x_center = source_speed * t
+T_total = T_heat * 1.1 # s
+def moving_heat_source(y_center, x, t):
+    x_center = y_center
+    y_center = source_speed * t
     # c = cf * (0.5 + 0.5 * np.tanh(1000 * (x[0] - x_center))) + \
     #     cr * (0.5 + 0.5 * np.tanh(1000 * (x_center - x[0])))
     # f = ff * (0.5 + 0.5 * np.tanh(1000 * (x[0] - x_center))) + \
@@ -86,7 +87,7 @@ def moving_heat_source(x, y_center, t):
     f = 1
     q_max = 6 * η * f * power * np.sqrt(3) / (np.pi**1.5 * radius * radius * radius)
 
-    return q_max* np.exp(-3 * (x[0] - x_center - cube.length/4)**2/radius**2 + -3 * (x[1] - y_center)**2 / radius**2) \
+    return q_max* np.exp(-3 * (x[0] - x_center)**2/radius**2 + -3 * (x[1] - y_center - cube.length/4)**2 / radius**2) \
                  * np.exp(-3 * (x[2] - cube.height)**2 / pen_depth**2)
 
 q = fem.Function(V, name = "Heat Source")  # Heat source
@@ -162,7 +163,7 @@ while t < T_total:
                 # Apply custom track ordering
                 track_id = track_order[current_segment]
                 y_center = track_spacing * (track_id - 0.5) + y_offset
-                q.x.array[:] = np.array([moving_heat_source(x, y_center, local_t) for x in domain.geometry.x], dtype=PETSc.ScalarType)
+                q.x.array[:] = np.array([moving_heat_source(y_center, x, local_t) for x in domain.geometry.x], dtype=PETSc.ScalarType)
             else:
                 q.x.array[:] = np.array([0.0 for _ in domain.geometry.x], dtype=PETSc.ScalarType)
         else:

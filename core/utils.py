@@ -5,7 +5,8 @@ from pathlib import Path
 import time
 import datetime
 import os
-
+import meshio
+from tqdm import tqdm
 def tetrahedral_to_edges(faces):
     """Computes mesh edges from triangles."""
     # collect edges from triangles
@@ -120,3 +121,53 @@ def save_dict_to_pkl(data_dict, file_path):
 def load_dict_from_pkl(file_path):
     with open(file_path, 'rb') as f:
         return pickle.load(f)
+    
+def plot_paraview_pvd(output_dir, filename, output, max_timesteps=50):
+    os.makedirs(output_dir, exist_ok=True)
+    
+    mesh_pos = output["mesh_pos"].detach().cpu().numpy()
+    cells = output["cells"].detach().cpu().numpy()
+    total_timesteps = len(output["pred"])
+
+    # Compute downsample step
+    step = max(1, total_timesteps // max_timesteps)
+    selected_indices = list(range(0, total_timesteps, step))[:max_timesteps]
+
+    pvd_entries = []
+
+    progress_bar = tqdm(selected_indices, total=len(selected_indices))
+    for out_idx, timestep in enumerate(progress_bar):
+        points = mesh_pos
+        temp_data = output["pred"][timestep, :].detach().cpu().numpy()
+        gt_temp_data = output["gt"][timestep, :].detach().cpu().numpy()
+        q_data = output["heat_source"][timestep].detach().cpu().numpy()
+
+        mesh = meshio.Mesh(
+            points=points,
+            cells=[("tetra", cells)],
+            point_data={
+                "pred": temp_data,
+                "gt": gt_temp_data,
+                "heat_source": q_data
+            }
+        )
+        vtu_dir = os.path.join(output_dir, "vtu")
+        os.makedirs(vtu_dir, exist_ok=True)
+        vtu_file = f"temperature_ts_{out_idx}.vtu"
+        meshio.write(os.path.join(vtu_dir, vtu_file), mesh)
+        pvd_entries.append(f'    <DataSet timestep="{out_idx}" group="" part="0" file="./vtu/{vtu_file}"/>')
+
+    # Write .pvd file
+    pvd_content = [
+        '<?xml version="1.0"?>',
+        '<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">',
+        '  <Collection>',
+        *pvd_entries,
+        '  </Collection>',
+        '</VTKFile>'
+    ]
+
+    with open(os.path.join(output_dir, f"{filename}.pvd"), "w") as f:
+        f.write('\n'.join(pvd_content))
+
+    print(f"PVD + VTU files written with downsampled time resolution (every {step} steps).")

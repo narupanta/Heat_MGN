@@ -5,7 +5,7 @@ import os
 from .utils import *
 import numpy as np
 class LPBFDataset(Dataset):
-    def __init__(self, data_dir, add_targets, split_frames, add_noise, time_window):
+    def __init__(self, data_dir, add_target, noise_level, time_window):
         """
         Generates synthetic dataset for material deformation use case.
 
@@ -17,10 +17,9 @@ class LPBFDataset(Dataset):
         """
         super(LPBFDataset, self).__init__()
         self.data_dir = data_dir
-        self.add_targets = add_targets
-        self.add_noise = add_noise
+        self.add_target = add_target
+        self.noise_level = noise_level 
         self.time_window = time_window
-        self.split_frames = split_frames
         self.file_name_list = [filename for filename in sorted(os.listdir(data_dir)) if not os.path.isdir(os.path.join(data_dir, filename))]
     def __len__(self):
         return len(self.file_name_list)
@@ -31,54 +30,54 @@ class LPBFDataset(Dataset):
         data = np.load(os.path.join(self.data_dir, file_name))
 
         decomposed_connectivity = tetrahedral_to_edges(torch.tensor(data['node_connectivity']))['two_way_connectivity']
-        temperature = torch.tensor(data["T"], dtype=torch.float).unsqueeze(-1)
-        heat_source = torch.tensor(data["q"], dtype=torch.float).unsqueeze(-1)
+        temperature = torch.tensor(data["T"], dtype=torch.float)
+        heat_source = torch.tensor(data["q"], dtype=torch.float)
         mesh_pos = torch.tensor(data["mesh_pos"], dtype=torch.float)
         cells = torch.tensor(data['node_connectivity'])
-        node_type = torch.zeros((mesh_pos.shape[0]), dtype=torch.int64)
-        # edge_index = torch.cat((decomposed_connectivity[0].reshape(1, -1), decomposed_connectivity[1].reshape(1, -1)), dim=0)
-        senders, receivers = decomposed_connectivity[0], decomposed_connectivity[1]
-        if self.add_targets :
-            target_temperature = torch.stack([temperature[i + 1 : i + 1 + self.time_window] for i in range(len(temperature) - self.time_window)])
-        if self.split_frames & self.add_targets :
-            #list of data (frame)
+        edge_index = torch.stack(decomposed_connectivity)
+        if self.add_target :
+            temperature_curr = temperature[1:-self.time_window]
+            temperature_prev = temperature[:-self.time_window - 1]
+            heat_source_curr = heat_source[1:-self.time_window]
+            heat_source_prev = heat_source[:-self.time_window - 1]
+            heat_source_next = torch.stack([heat_source[i + 1 : i + 1 + self.time_window] for i in range(temperature_curr.shape[0])])
+            target_temperature = torch.stack([temperature[i + 1 : i + 1 + self.time_window] for i in range(temperature_curr.shape[0])])
             frames = []
-            for idx in range(target_temperature.shape[0]) :
-                temperature_t = temperature[idx]
+            for idx in range(temperature_curr.shape[0]) :
+                temperature_t = temperature_curr[idx]
+                temperature_prev_t = temperature_prev[idx]
                 target_temperature_t = target_temperature[idx]
-                heat_source_t = heat_source[idx]
-                if self.add_noise :
-                    temperature_noise_scale = (torch.max(temperature) - torch.min(temperature)) * 0.05
-                    heat_source_noise_scale = (torch.max(heat_source) - torch.min(heat_source)) * 0
+                
+                heat_source_t = heat_source_curr[idx]
+                heat_source_prev_t = heat_source_prev[idx]
+                heat_source_next_t = heat_source_next[idx]
+                if self.noise_level > 0.0 :
+                    temperature_noise_scale = (torch.max(temperature) - torch.min(temperature)) * self.noise_level
                     temperature_noise = torch.zeros_like(temperature_t) + temperature_noise_scale * torch.randn_like(temperature_t)
                     temperature_t += temperature_noise
-                frame = Data(temperature = temperature_t.unsqueeze(0), 
-                             target_temperature = target_temperature_t, 
-                             heat_source = heat_source_t.unsqueeze(0),
-                             mesh_pos = mesh_pos.unsqueeze(0),  
-                             senders = senders, 
-                             receivers = receivers, 
-                             cells = cells.unsqueeze(0),
-                             node_type = node_type.unsqueeze(0))
+                frame = Data(temperature_prev = temperature_prev_t,
+                            temperature = temperature_t, 
+                            target_temperature = target_temperature_t.T, 
+                            heat_source_prev = heat_source_prev_t,
+                            heat_source = heat_source_t,
+                            heat_source_next = heat_source_next_t.T,
+                            mesh_pos = mesh_pos,  
+                            edge_index = edge_index,
+                            cells = cells)
                 frames.append(frame)
-            return frames
+        else :
+            frames = [Data(temperature = temperature[t],
+                 heat_source = heat_source[t],
+                 mesh_pos = mesh_pos,  
+                 edge_index = edge_index,
+                 cells = cells) for t in range(temperature.shape[0])]
+        return frames
 
-
-        return Data(temperature = temperature, 
-                    mesh_pos = mesh_pos, 
-                    heat_source = heat_source, 
-                    node_type = node_type,
-                    cells = cells, 
-                    senders = senders, 
-                    receivers = receivers)
     def get_name(self, idx) :
         return self.file_name_list[idx]
 
 if __name__ == "__main__" :
-    data_dir = r"/mnt/c/Users/narun/OneDrive/Desktop/Project/Heat_MGN/output/20250429T151016"
-    dataset = LPBFDataset(data_dir, add_targets=True, split_frames=True, add_noise = True, time_window = 10)
+    data_dir = r"/mnt/c/Users/narun/Desktop/Project/Heat_MGN/dataset/trainset"
+    dataset = LPBFDataset(data_dir, noise_level = 0.01, time_window = 10)
     data = dataset[1]
-    print(data[0].temperature)
-    print(data[0].target_temperature)
-    print(data[0])
-    print(len(dataset))
+    check = 5

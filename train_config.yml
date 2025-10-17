@@ -1,0 +1,18 @@
+device: cuda
+paths:
+  data_dir: ./dataset/trainset
+  model_dir: ./trained_models/
+model: 
+  node_in_dim: 14
+  edge_in_dim: 5
+  node_out_dim: 1
+  hidden_size: 128
+  process_steps: 5
+  attention: True
+  time_window: 10
+training:
+  learning_rate: 1e-4
+  weight_decay: 1e-5
+  num_epochs: 100
+  start_noise_level: 0.05
+  end_noise_level: 0.01

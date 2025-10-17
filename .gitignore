@@ -1,2 +1,6 @@
-output/*
-rollout/*
+groundtruth/*
+rollouts/*
+geometry/*
+figures/*
+trained_models/*
+

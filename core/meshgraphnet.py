@@ -18,12 +18,15 @@ def edge_smoothness_loss(pred, edge_index):
     """
     i, j = edge_index
     diff = pred[i] - pred[j]
-    return torch.mean(diff ** 2)
+    return diff
 
 
-def smoothness_on_delta(delta_pred, edge_index):
+def smoothness_on_delta(delta_pred, delta_gt, edge_index):
     """Smoothness regularizer on predicted ΔT = T_pred - T_prev."""
-    return edge_smoothness_loss(delta_pred, edge_index)
+    grad_delta_pred = edge_smoothness_loss(delta_pred, edge_index)
+    grad_delta_gt = edge_smoothness_loss(delta_gt, edge_index)
+    diff = torch.mean((grad_delta_pred - grad_delta_gt)**2)
+    return diff
 def MLP(in_dim, out_dim, hidden_dims=(128, 128), activate_final=False, layer_norm=False):
     layers = []
     last = in_dim
@@ -179,8 +182,8 @@ class EncodeProcessDecode(nn.Module):
         target_delta_normalize = self.output_normalizer(target_delta)
         pred_delta = self.forward(graph)
         error = (pred_delta - target_delta_normalize)**2
-        # smoothness_loss = smoothness_on_delta(pred_delta, graph.edge_index)
-        smoothness_loss = torch.tensor(0, device = self.device)
+        smoothness_loss = smoothness_on_delta(pred_delta, target_delta_normalize, graph.edge_index)
+        # smoothness_loss = torch.tensor(0, device = self.device)
         mse = torch.mean(error)
         return mse + smoothness_loss, mse, smoothness_loss
     def predict(self, graph):

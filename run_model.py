@@ -129,15 +129,13 @@ if __name__ == "__main__":
             for batch in loop:
                 batch = batch.to(device)
                 optimizer.zero_grad()
-                loss, mse, smoothness_loss = model.loss(batch)
+                loss = model.loss(batch)
                 loss.backward()
                 optimizer.step()
                 traj_total_loss += loss.item()
                 loop.set_description(f"Epoch {train_epoch + 1}, Traj {traj_idx + 1}")
                 loop.set_postfix({
-                        "Loss": f"{loss.item():.4f}",
-                        "MSE": f"{mse.item():.4f}",
-                        "Smoothness Loss": f"{smoothness_loss.item():.4f}"
+                        "Loss": f"{loss.item():.4f}"
                     })
             total_loss += traj_total_loss
             logger.info(

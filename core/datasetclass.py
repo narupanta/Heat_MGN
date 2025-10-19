@@ -55,6 +55,10 @@ class LPBFDataset(Dataset):
                     temperature_noise_scale = (torch.max(temperature) - torch.min(temperature)) * self.noise_level
                     temperature_noise = torch.zeros_like(temperature_t) + temperature_noise_scale * torch.randn_like(temperature_t)
                     temperature_t += temperature_noise
+
+                    temperature_prev_noise_scale = (torch.max(temperature_prev) - torch.min(temperature_prev)) * self.noise_level
+                    temperature_prev_noise = torch.zeros_like(temperature_t) + temperature_prev_noise_scale * torch.randn_like(temperature_t)
+                    temperature_prev_t += temperature_prev_noise
                 frame = Data(temperature_prev = temperature_prev_t,
                             temperature = temperature_t, 
                             target_temperature = target_temperature_t.T, 

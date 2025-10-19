@@ -182,10 +182,9 @@ class EncodeProcessDecode(nn.Module):
         target_delta_normalize = self.output_normalizer(target_delta)
         pred_delta = self.forward(graph)
         error = (pred_delta - target_delta_normalize)**2
-        smoothness_loss = smoothness_on_delta(pred_delta, target_delta_normalize, graph.edge_index)
         # smoothness_loss = torch.tensor(0, device = self.device)
         mse = torch.mean(error)
-        return mse + smoothness_loss, mse, smoothness_loss
+        return mse
     def predict(self, graph):
         pred_delta_normalized = self.forward(graph)
         pred_delta = self.output_normalizer.inverse(pred_delta_normalized)

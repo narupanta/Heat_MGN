@@ -52,9 +52,17 @@ def rollout(model, data):
         # Compute error
         check = torch.max(heat_source)
         error = (rollout_preds.to(device) - rollout_gts.to(device)) ** 2
+        error_percent = ((rollout_preds.to(device)/rollout_gts.to(device) - 1) * 100) ** 2
         rmse_temperature = torch.sqrt(torch.mean(error))
+        percent_rmse_temperature = torch.sqrt(torch.mean(error_percent))
+        max_error_temperature = torch.max(torch.abs(rollout_preds.to(device) - rollout_gts.to(device)))
+        percent_max_error_temperature = torch.max(torch.abs(rollout_preds.to(device)/rollout_gts.to(device) - 1)*100)
 
         print(f"RMSE T: {rmse_temperature:.6f}")
+        print(f"% RMSE T: {percent_rmse_temperature:.6f}")
+        print(f"Max Error T: {max_error_temperature:.6f}")
+        print(f"% Max Error T: {percent_max_error_temperature:.6f}")
+
 
     return {
         "pred": rollout_preds,

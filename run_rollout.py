@@ -10,11 +10,24 @@ from torch_geometric.loader import DataLoader
 import numpy as np
 from core.rollout import rollout
 from core.utils import plot_paraview_pvd
+
 if __name__ == "__main__":
+    import logging
+    import sys
+    # -----------------------------
+    # Setup logging
+    log_file = "rollout_log.txt"
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s [%(levelname)s] %(message)s',
+                        handlers=[
+                            logging.FileHandler(log_file),
+                            logging.StreamHandler(sys.stdout)
+                        ])
+    log = logging.getLogger()
     # find config.yml in model directory
-    load_model_dir = "./trained_models/20251016T163851"
-    data_dir = "./dataset/testset"
-    save_rollout_dir = "./rollouts/testset"
+    load_model_dir = "./trained_models/continued_from_best_model_20251020T135254"
+    data_dir = "./dataset/trainset"
+    save_rollout_dir = "./rollouts/trainset"
     config_path = os.path.join(load_model_dir, 'config.yml')
     if not os.path.exists(config_path):
         print(f"Config file not found in {load_model_dir}")
@@ -78,6 +91,7 @@ if __name__ == "__main__":
                             mesh_pos = trajectory_rollout["mesh_pos"].detach().cpu().numpy(),
                             rmse_T = trajectory_rollout["rmse_T"].detach().cpu().numpy())
         print(f"Rollout predictions and error saved in {save_rollout_dir}")
+        print(f"RMSE T: {trajectory_rollout["rmse_T"].detach().cpu().numpy().float():.6f}")
         plot_paraview_pvd(save_rollout_dir + "_paraview" + "/" + sample_name, sample_name, trajectory_rollout)
         
 

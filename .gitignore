@@ -1,7 +1,7 @@
 groundtruth/*
 rollouts/*
 geometry/*
-figures/*
 dataset/*
 trained_models/*
+animations/*
 

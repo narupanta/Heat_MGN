@@ -1,14 +1,16 @@
 # Moving Heat Source Simulation using GNN Surrogate Models
 
 Moving Heat Source Simulation is a key additive manufacturing (AM) technology, specifically Laser Powder Bed Fusion, that enables the fabrication of complex metal parts with high resolution and material efficiency. Numerical simulation of the moving heat source process plays a critical role in reducing the need for costly and time-consuming trial-and-error experimentation, thereby minimizing material waste and development time.
-This project focuses on developing Graph Neural Network (GNN) based surrogate models to simulate heat diffusion with a moving heat source efficiently. Similar to the work on "Physics-Informed Surrogates for Temperature Prediction of Multi-Tracks in Laser Powder Bed Fusion" [[1]](#1), this project leverages GNNs to model temperature evolution for different laser scanning pattern and extension to multi-track scanning, enabling fast and accurate predictions while reducing computational costs.
+This project focuses on developing Graph Neural Network (GNN) based surrogate models to simulate heat diffusion with a moving heat source efficiently. Similar to the work on "Physics-Informed Surrogates for Temperature Prediction of Multi-Tracks in Laser Powder Bed Fusion" [[1]](#1), this project leverages GNNs, specifically MeshGraphNets [[2]](#2) and MPNN [[4]](#4) to model temperature evolution for different laser scanning pattern and extension to multi-track scanning, enabling fast and accurate predictions while reducing computational costs.
 moving heat source, including:
 
 * Laser-material interaction
 * Steep thermal gradients
 * Melt pool dynamics
 
-![til](https://github.com/narupanta/)
+Below is the example of simulation with single track scanning at the middle of the specimen.
+
+![til](./figures/single_mid.gif)
 
 ## Heat Diffusion Equation and Moving Heat Source Model
 
@@ -49,12 +51,90 @@ To address these challenges, this research explores **surrogate modeling approac
 ## Training
 The model is trained based on one-step multiple prediction basis (1 function evaluation gives $n$ timestep predictions) adopting the message passing neural PDE framework [[4]](#4) to model transient heat diffusion with a moving Goldak heat source, enabling data-driven acceleration of thermal simulations.
 ## Example of Results
+The model is trained on five trajectories: single-track (x and y axes), double-track (x and y axes), and circular scanning. 
+
+Evaluation is performed on unseen scanning patterns, such as:
+1. **Triple Track scanning**
+<div style="display:flex; justify-content:space-between; align-items:flex-start;">
+  <div style="text-align:center;">
+    <img src="./figures/triple123_pred.gif" width="88%">
+    <p>Prediction</p>
+  </div>
+  <div style="text-align:center;">
+    <img src="./figures/triple123_gt.gif" width="88%">
+    <p>Ground Truth</p>
+  </div>
+</div>
+<div style="display:flex; justify-content:space-between; align-items:flex-start;">
+
+  <div style="text-align:center;">
+    <img src="./figures/triple123_temperature_gt_pred_isoline.png" width="50%">
+    <p>Prediction vs Groundtruth Temperature</p>
+  </div>
+
+</div>
+
+<div style="display:flex; justify-content:space-between; align-items:flex-start;">
+
+  <div style="text-align:center;">
+    <img src="./figures/triple123_temperature_timestep_400.png" width="88%">
+    <p>Prediction vs Groundtruth Temperature Field with Meltpool Geometry</p>
+  </div>
+
+</div>
+
+2. **Square Track scanning**
+<div style="display:flex; justify-content:space-between; align-items:flex-start;">
+  <div style="text-align:center;">
+    <img src="./figures/square_scan_pred.gif" width="88%">
+    <p>Prediction</p>
+  </div>
+  <div style="text-align:center;">
+    <img src="./figures/square_scan_gt.gif" width="88%">
+    <p>Ground Truth</p>
+  </div>
+</div>
+<div style="display:flex; justify-content:space-between; align-items:flex-start;">
+
+  <div style="text-align:center;">
+    <img src="./figures/square_temperature_gt_pred_isoline.png" width="50%">
+    <p>Prediction vs Groundtruth Temperature</p>
+  </div>
+
+</div>
+
+<div style="display:flex; justify-content:space-between; align-items:flex-start;">
+
+  <div style="text-align:center;">
+    <img src="./figures/square_temperature_timestep_600.png" width="88%">
+    <p>Prediction vs Groundtruth Temperature Field with Meltpool Geometry</p>
+  </div>
+
+</div>
+
+### Accuracy and Speed Comparison
+<!-- | Dataset | # Nodes | # Cells | RMSE T (K) | Max Error T (K)| Time FEM (s) | Time GNN (s) (speed up) |
+|--------------|---------|--------|--------|--------------|--------------|--------------|
+| Square   | 8.6k   | 49.6k   | 52.15 (10.50 %) |249.15 (49.71 %)| 191.81        | 4.0 ($\times 48$)          |
+| Triple123    | 5.9k   | 33.5k  | 18.41 (3.33%) | 118.1 (19.25 %) | 62.57         | 1.0  ($\times 62$)        |
+| Triple213    | 5.9k   | 33.5k  | 21.17 (4.13 % ) | 133.09 (18.12 %) | 62.39        | 1.0 ($\times 62$)      
+| Triple321    | 5.9k   | 33.5k  | 18.21 (3.19 %)  |129.62 (20.13%) | 62.38        | 1.0  ($\times 62$)  |
+| Quad1234    | 7.8k   | 44.2k  | 29.26 (5.57 %)  |162.444336 (29.24 %)| 110.16        | 2.0  ($\times 55$)   | -->
+
+| **Dataset**     | **# Nodes** | **# Cells**  | **RMSE T (K)**       | **Time FEM (s)** | **Time GNN (s) (speed-up)** |
+|------------|--------:|---------:|----------------:|-------------:|-------------------------:|
+| Square      | 8.6k    | 49.6k    | 52.15 (10.50%)  | 191.81       | 4.0 (×48)               |
+| Triple123   | 5.9k    | 33.5k    | 18.41 (3.33%)   | 62.57        | 1.0 (×62)               |
+| Triple213   | 5.9k    | 33.5k    | 21.17 (4.13%)   | 62.39        | 1.0 (×62)               |
+| Triple321   | 5.9k    | 33.5k    | 18.21 (3.19%)   | 62.38        | 1.0 (×62)               |
+| Quad1234    | 7.8k    | 44.2k    | 29.26 (5.57%)   | 110.16       | 2.0 (×55)               |
+
 
 
 ## Summary
 
 This project focuses on developing GNN-based surrogate models to accelerate moving heat source simulations, reduce computational cost, and enable rapid optimization, while preserving key physical insights from high-fidelity FEM simulations.
-However, the model struggles to capture diffusion of the temperature in the cooling part
+However, the model struggles to capture diffusion of the temperature in the cooling par (See both results)
 
 ---
 ## References

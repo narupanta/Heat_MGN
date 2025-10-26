@@ -14,14 +14,14 @@ import time
 # -----------------------------
 cube = Cube(2e-3, 2e-3, 1e-3)
 
-size_min = 0.1e-3
+size_min = 0.07e-3
 dist_min = 0.25e-3
 y_offset = 0.0
 num_track = 1
 track_order = [1]  # Custom order (1-based index)
 assert len(track_order) == num_track and set(track_order) == set(range(1, num_track + 1))
 geometry_dir = "/mnt/c/Users/narun/Desktop/Project/Heat_MGN/geometry"
-output_dir = "./groundtruth/"
+output_dir = "./groundtruth/fine_dataset/"
 # --- Geometry & Mesh ---
 input_geometry_path = create_msh_file(geometry_dir, "cube", cube, size_min, dist_min, y_offset, num_track)
 domain, cell_tags, facet_tags = gmshio.read_from_msh(input_geometry_path, MPI.COMM_WORLD, 0)
@@ -76,7 +76,7 @@ ff, fr = 2/(1 + cr/cf), 2/(1 + cf/cr)
 pen_depth = 0.5e-3 # m
 dt = 5e-5 # s
 T_heat = cube.length * 0.5/source_speed * num_track
-T_total = T_heat * 3.0 # s
+T_total = T_heat * 1.1 # s
 def moving_heat_source(x, y_center, t):
     x_center = source_speed * t
     # c = cf * (0.5 + 0.5 * np.tanh(1000 * (x[0] - x_center))) + \

@@ -57,11 +57,11 @@ Evaluation is performed on unseen scanning patterns, such as:
 1. **Triple Track scanning**
 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
   <div style="text-align:center;">
-    <img src="./figures/triple123_pred.gif" width="88%">
+    <img src="./figures/triple123_pred.gif" width="44%">
     <p>Prediction</p>
   </div>
   <div style="text-align:center;">
-    <img src="./figures/triple123_gt.gif" width="88%">
+    <img src="./figures/triple123_gt.gif" width="44%">
     <p>Ground Truth</p>
   </div>
 </div>
@@ -86,11 +86,11 @@ Evaluation is performed on unseen scanning patterns, such as:
 2. **Square Track scanning**
 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
   <div style="text-align:center;">
-    <img src="./figures/square_scan_pred.gif" width="88%">
+    <img src="./figures/square_scan_pred.gif" width="44%">
     <p>Prediction</p>
   </div>
   <div style="text-align:center;">
-    <img src="./figures/square_scan_gt.gif" width="88%">
+    <img src="./figures/square_scan_gt.gif" width="44%">
     <p>Ground Truth</p>
   </div>
 </div>
